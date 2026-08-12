@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NexusFind — Smart Lost & Found</title>
+  <link rel="icon" type="image/png" sizes="16x16" href="images/favicon-16x16.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="images/favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="48x48" href="images/favicon-48x48.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="images/apple-touch-icon.png" />
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .brand-logo { width: 54px; height: 62px; object-fit: cover; object-position: center 23%; mix-blend-mode: screen; border-radius: 12px; }
+    .brand-name { color: var(--text); font-size: 26px; font-weight: 800; letter-spacing: -1.2px; white-space: nowrap; }
+    .brand-name span { color: #a9b4ff; }
+    .mobile-logo { width: 38px; height: 46px; object-fit: cover; object-position: center 23%; mix-blend-mode: screen; border-radius: 9px; }
+    .mobile-wordmark { color: var(--text); font-weight: 800; font-size: 20px; letter-spacing: -0.8px; }
+    .mobile-wordmark span { color: #a9b4ff; }
+    #auth-root { min-height: 100vh; background: radial-gradient(circle at 50% 24%, rgba(89, 75, 224, .18), transparent 30%), var(--bg); display: grid; place-items: center; padding: 32px 18px; }
+    .auth-card-wrap { width: min(100%, 560px); text-align: center; }
+    .auth-logo { width: 122px; height: 106px; object-fit: contain; object-position: center 23%; mix-blend-mode: screen; border-radius: 22px; margin-bottom: 3px; }
+    .auth-title { margin: 0; font-size: 38px; letter-spacing: -1.5px; color: var(--text); }
+    .auth-title span { color: #a9b4ff; }
+    .auth-subtitle { margin: 6px 0 36px; color: var(--muted); font-size: 17px; }
+    .auth-card { text-align: left; padding: 38px 40px; border: 1px solid var(--line); border-radius: 22px; background: linear-gradient(135deg, rgba(38, 39, 67, .96), rgba(23, 25, 38, .96)); box-shadow: 0 20px 60px rgba(0,0,0,.2); }
+    .auth-card h2 { margin: 0 0 6px; color: var(--text); font-size: 27px; letter-spacing: -.8px; }
+    .auth-card > p { color: var(--muted); margin: 0 0 25px; }
+    .auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 25px; padding: 5px; border-radius: 13px; background: rgba(5, 6, 17, .24); }
+    .auth-tabs button { border: 0; border-radius: 9px; background: transparent; color: var(--muted); padding: 11px; font: inherit; font-weight: 700; cursor: pointer; }
+    .auth-tabs button.active { background: #342e78; color: #c5cbff; }
+    .auth-form { display: grid; gap: 18px; }
+    .auth-form .field { gap: 7px; }
+    .auth-form .button { margin-top: 5px; width: 100%; }
+    .auth-error { min-height: 20px; color: #ff7b85; font-size: 14px; margin: 0; }
+    .auth-footnote { text-align: center; color: var(--muted); font-size: 13px; margin: 19px 0 0 !important; }
+    .auth-role-label { display: block; color: var(--muted); font-size: 14px; font-weight: 700; margin: 0 0 9px; }
+    .auth-roles { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 21px; }
+    .auth-role { height: 52px; border: 1px solid var(--line); border-radius: 14px; background: transparent; color: var(--muted); font: inherit; font-weight: 700; cursor: pointer; }
+    .auth-role.active { border-color: #6255e8; background: #383475; color: #b9c4ff; }
+    .auth-divider { display: flex; align-items: center; gap: 13px; color: var(--muted); font-size: 13px; margin: 23px 0; }
+    .auth-divider::before, .auth-divider::after { content: ''; height: 1px; flex: 1; background: var(--line); }
+    .google-button { width: 100%; min-height: 52px; border: 1px solid var(--line); border-radius: 14px; background: transparent; color: var(--text); font: inherit; font-weight: 700; cursor: pointer; }
+    .google-button:hover { background: rgba(255,255,255,.04); }
+    .google-icon { width: 19px; height: 19px; object-fit: contain; vertical-align: -4px; margin-right: 8px; }
+    .auth-switch { background: none; border: 0; padding: 0; color: #adb7ff; font: inherit; font-weight: 700; cursor: pointer; }
+    .logout-button { width: 100%; border: 1px solid rgba(255, 93, 110, .42); border-radius: 9px; padding: 9px 10px; color: #ff8791; background: rgba(255, 78, 91, .08); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+    .logout-button:hover { background: rgba(255, 78, 91, .16); }
+    #app-shell[hidden], #auth-root[hidden] { display: none !important; }
+    @media (max-width: 560px) { .auth-card { padding: 28px 21px; } .auth-title { font-size: 32px; } }
+  </style>
+</head>
+<body>
+  <section id="auth-root" aria-live="polite"></section>
+  <div class="app-shell" id="app-shell" hidden>
+    <aside class="sidebar" id="sidebar">
+      <div class="brand"><img class="brand-logo" src="images/logo_nexusfind.png" alt="NexusFind logo" /><span class="brand-name">Nexus<span>Find</span></span><button class="collapse" aria-label="Collapse navigation">←</button></div>
+      <nav class="nav" aria-label="Main navigation">
+        <button class="nav-link active" data-page="home"><i>⌂</i>Home</button>
+        <button class="nav-link" data-page="browse"><i>⦿</i>Browse Items</button>
+        <button class="nav-link" data-page="lost"><i>□</i>Report Lost</button>
+        <button class="nav-link" data-page="found"><i>☑</i>Report Found</button>
+        <button class="nav-link notify-link" data-page="notifications"><i>🔔<b>3</b></i>Notifications <em>3</em></button>
+      </nav>
+      <div class="sidebar-bottom"><a href="#">My Reports</a><a href="#">About</a><button class="theme-button" id="themeToggle">☀ <span>Light mode</span></button><button class="logout-button" id="logoutButton" type="button">Log out</button></div>
+    </aside>
+    <main class="content">
+      <header class="mobile-bar"><button id="mobileMenu" aria-label="Open menu">☰</button><div class="mobile-brand"><img class="mobile-logo" src="images/logo_nexusfind.png" alt="NexusFind logo" /><span class="mobile-wordmark">Nexus<span>Find</span></span></div><button id="mobileTheme" aria-label="Toggle theme">☀</button></header>
+      <section id="page-root"></section>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
