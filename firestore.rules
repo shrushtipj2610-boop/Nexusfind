@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /items/{itemId} {
+      // Campus users can browse reports, while authors retain control of theirs.
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.type in ['lost', 'found']
+        && request.resource.data.itemName is string
+        && request.resource.data.category is string
+        && request.resource.data.description is string;
+      allow update: if request.auth != null
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId;
+      allow delete: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if request.auth != null;
+      // A notification can only be created in the same atomic write as its
+      // report, and its ID must be that report's ID. This prevents standalone
+      // client-side notification writes and guarantees one notification/report.
+      allow create: if request.auth != null
+        && notificationId == request.resource.data.reportId
+        && request.resource.data.read == false
+        && request.resource.data.type in ['lost_report', 'found_report']
+        && getAfter(/databases/$(database)/documents/items/$(request.resource.data.reportId)).data.userId == request.auth.uid;
+      // Students may only mark an unread notification as read; no notification
+      // text, link, type, or ownership data can be altered.
+      allow update: if request.auth != null
+        && resource.data.read == false
+        && request.resource.data.read == true
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow delete: if false;
+    }
+  }
+}

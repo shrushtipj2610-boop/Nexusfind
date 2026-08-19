@@ -1,5 +1,5 @@
-import { createItemReport } from './database.js';
-import { logout, signIn, signInWithGoogle, signUp, watchAuthentication } from './auth.js';
+import { createItemReport, getItemReport, markNotificationRead, watchItemReports, watchNotifications } from './database.js';
+import { getCurrentUser, logout, signIn, signInWithGoogle, signUp, watchAuthentication } from './auth.js';
 
 const authRoot = document.querySelector('#auth-root');
 const appShell = document.querySelector('#app-shell');
@@ -57,7 +57,7 @@ async function showDashboard() {
   appShell.hidden = false;
   document.querySelector('#logoutButton').disabled = false;
   if (!dashboardLoaded) {
-    window.NexusFind = { createItemReport };
+    window.NexusFind = { createItemReport, getItemReport, markNotificationRead, watchItemReports, watchNotifications, currentUser: getCurrentUser };
     await import('./script.js');
     dashboardLoaded = true;
   }
