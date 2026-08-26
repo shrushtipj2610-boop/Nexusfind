@@ -19,4 +19,4 @@ const app = isConfigured ? initializeApp(firebaseConfig) : null;
 const auth = app ? getAuth(app) : null;
 const db = app ? getFirestore(app) : null;
 
-export { auth, db, isConfigured };
+export { app, auth, db, isConfigured };
