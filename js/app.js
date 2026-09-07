@@ -23,20 +23,33 @@ function showDashboardMessage(message) {
 
 function firebaseErrorMessage(error) {
   const messages = {
-    'auth/invalid-credential': 'Incorrect email or password.',
-    'auth/user-not-found': 'No account exists with this email.',
+    'auth/invalid-credential': 'Incorrect username or password.',
+    'auth/user-not-found': 'Incorrect username or password.',
+    'auth/username-not-found': 'Username not found.',
+    'auth/username-already-in-use': 'This username is already in use.',
     'auth/email-already-in-use': 'An account already exists for this email address.',
     'auth/invalid-email': 'Enter a valid email address.',
     'auth/weak-password': 'Choose a password with at least 6 characters.',
     'auth/too-many-requests': 'Too many login attempts. Please try again later.',
-    'auth/operation-not-allowed': 'Email/password login is currently unavailable.'
+    'auth/operation-not-allowed': 'Email/password login is currently unavailable.',
+    'permission-denied': 'Username lookup was blocked by Firestore permissions. Deploy the users lookup rule before signing in.',
+    'unavailable': 'Firestore is unavailable. Check your connection and try again.',
+    'deadline-exceeded': 'Firestore did not respond in time. Please try again.',
+    'auth/network-request-failed': 'Firebase could not be reached. Check your connection and try again.',
+    'auth/invalid-api-key': 'Firebase configuration is invalid. Check the Firebase web configuration.',
+    'auth/app-not-authorized': 'This app is not authorized to use the configured Firebase project.',
+    'auth/configuration-not-found': 'Firebase Authentication is not configured for this project.'
   };
-  return messages[error?.code] || 'We could not complete that request. Please try again.';
+  if (messages[error?.code]) return messages[error.code];
+  return `Login failed${error?.code ? ` (${error.code})` : ''}: ${error?.message || 'Unknown Firebase error.'}`;
 }
 
 function renderAuth(mode = 'login', setupError = '', selectedRole = 'student') {
   const signingUp = mode === 'signup';
-  authRoot.innerHTML = `<div class="auth-card-wrap"><img class="auth-logo" src="images/logo_nexusfind.png" alt="NexusFind logo"><h1 class="auth-title">Nexus<span>Find</span></h1><p class="auth-subtitle">Smart Lost & Found Portal</p><section class="auth-card"><h2>${signingUp ? 'Create your account' : 'Sign in to your account'}</h2><p>${signingUp ? 'Join your campus lost & found community.' : ''}</p><span class="auth-role-label">${signingUp ? 'SIGN UP AS' : 'LOGIN AS'}</span><div class="auth-roles"><button class="auth-role ${selectedRole === 'student' ? 'active' : ''}" data-role="student" type="button">🎓 &nbsp;Student</button><button class="auth-role ${selectedRole === 'staff' ? 'active' : ''}" data-role="staff" type="button">👤 &nbsp;Staff</button></div><form class="auth-form" id="auth-form" novalidate>${signingUp ? '<div class="field"><label for="auth-name">Full name</label><input class="input" id="auth-name" autocomplete="name" placeholder="Your full name" required></div>' : ''}<div class="field"><label for="auth-email">College email</label><input class="input" id="auth-email" type="email" autocomplete="email" placeholder="e.g. student@college.edu" required></div><div class="field"><label for="auth-password">Password</label><input class="input" id="auth-password" type="password" autocomplete="${signingUp ? 'new-password' : 'current-password'}" placeholder="Enter your password" required></div>${signingUp ? '<div class="field"><label for="auth-confirm-password">Confirm password</label><input class="input" id="auth-confirm-password" type="password" autocomplete="new-password" placeholder="Confirm your password" required></div>' : ''}<p class="auth-error" id="auth-error">${setupError}</p><button class="button" type="submit">${signingUp ? 'Create Account' : 'Sign In'}</button></form>${signingUp ? '<div class="auth-divider">OR</div><button class="google-button" type="button" id="google-auth">ⓖ &nbsp; Sign up with Google</button>' : ''}<p class="auth-footnote">${signingUp ? 'Already have an account? ' : 'New to NexusFind? '}<button class="auth-switch" data-auth-mode="${signingUp ? 'login' : 'signup'}" type="button">${signingUp ? 'Sign in' : 'Create an account'}</button></p></section></div>`;
+  const accountIdentifierField = signingUp
+    ? '<div class="field"><label for="auth-username">Username</label><input class="input" id="auth-username" name="username" type="text" autocomplete="username" placeholder="Enter your username" required></div><div class="field"><label for="auth-email">College email</label><input class="input" id="auth-email" name="email" type="email" autocomplete="email" placeholder="e.g. student@college.edu" required></div>'
+    : '<div class="field"><label for="auth-username">Username</label><input class="input" id="auth-username" name="username" type="text" autocomplete="username" placeholder="Enter your username" required></div>';
+  authRoot.innerHTML = `<div class="auth-card-wrap"><img class="auth-logo" src="images/logo_nexusfind.png" alt="NexusFind logo"><h1 class="auth-title">Nexus<span>Find</span></h1><p class="auth-subtitle">Smart Lost & Found Portal</p><section class="auth-card"><h2>${signingUp ? 'Create your account' : 'Sign in to your account'}</h2><p>${signingUp ? 'Join your campus lost & found community.' : ''}</p><span class="auth-role-label">${signingUp ? 'SIGN UP AS' : 'LOGIN AS'}</span><div class="auth-roles"><button class="auth-role ${selectedRole === 'student' ? 'active' : ''}" data-role="student" type="button">🎓 &nbsp;Student</button><button class="auth-role ${selectedRole === 'staff' ? 'active' : ''}" data-role="staff" type="button">👤 &nbsp;Staff</button></div><form class="auth-form" id="auth-form" novalidate>${signingUp ? '<div class="field"><label for="auth-name">Full name</label><input class="input" id="auth-name" autocomplete="name" placeholder="Your full name" required></div>' : ''}${accountIdentifierField}<div class="field"><label for="auth-password">Password</label><input class="input" id="auth-password" type="password" autocomplete="${signingUp ? 'new-password' : 'current-password'}" placeholder="Enter your password" required></div>${signingUp ? '<div class="field"><label for="auth-confirm-password">Confirm password</label><input class="input" id="auth-confirm-password" type="password" autocomplete="new-password" placeholder="Confirm your password" required></div>' : ''}<p class="auth-error" id="auth-error">${setupError}</p><button class="button" type="submit">${signingUp ? 'Create Account' : 'Sign In'}</button></form>${signingUp ? '<div class="auth-divider">OR</div><button class="google-button" type="button" id="google-auth">ⓖ &nbsp; Sign up with Google</button>' : ''}<p class="auth-footnote">${signingUp ? 'Already have an account? ' : 'New to NexusFind? '}<button class="auth-switch" data-auth-mode="${signingUp ? 'login' : 'signup'}" type="button">${signingUp ? 'Sign in' : 'Create an account'}</button></p></section></div>`;
   document.querySelectorAll('[data-auth-mode]').forEach((button) => { button.onclick = () => renderAuth(button.dataset.authMode, setupError, selectedRole); });
   document.querySelectorAll('[data-role]').forEach((button) => { button.onclick = () => renderAuth(mode, setupError, button.dataset.role); });
   document.querySelector('#auth-form').onsubmit = async (event) => {
@@ -47,10 +60,10 @@ function renderAuth(mode = 'login', setupError = '', selectedRole = 'student') {
     const submitButton = form.querySelector('button[type="submit"]');
     submitButton.disabled = true; submitButton.textContent = signingUp ? 'Creating account...' : 'Signing in...'; error.textContent = '';
     try {
-      if (signingUp) await signUp(document.querySelector('#auth-name').value, document.querySelector('#auth-email').value, document.querySelector('#auth-password').value, document.querySelector('#auth-confirm-password').value);
-      else await signIn(document.querySelector('#auth-email').value, document.querySelector('#auth-password').value);
+      if (signingUp) await signUp(document.querySelector('#auth-name').value, document.querySelector('#auth-username').value, document.querySelector('#auth-email').value, document.querySelector('#auth-password').value, document.querySelector('#auth-confirm-password').value, selectedRole);
+      else await signIn(document.querySelector('#auth-username').value, document.querySelector('#auth-password').value);
     } catch (authError) {
-      console.error("Firebase login error:", authError.code, authError.message, authError);
+      console.error('Login error:', authError.code, authError.message, authError);
       error.textContent = firebaseErrorMessage(authError); submitButton.disabled = false; submitButton.textContent = signingUp ? 'Create Account' : 'Sign In';
     }
   };

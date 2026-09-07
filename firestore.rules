@@ -1,6 +1,20 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // The login form resolves a username to its Firebase email before the
+    // user is authenticated. Exact document reads are allowed, while queries
+    // and list operations remain denied.
+    match /users/{usernameId} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if request.auth != null
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.role in ['student', 'staff']
+        && request.resource.data.keys().hasOnly(['username', 'email', 'uid', 'role']);
+      allow update, delete: if false;
+    }
+
     match /items/{itemId} {
       // Campus users can browse reports, while authors retain control of theirs.
       allow read: if request.auth != null;

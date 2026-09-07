@@ -13,3 +13,4 @@ button.notification{width:100%;color:var(--text);font:inherit;text-align:left;cu
 .page.home .hero .search input{color:#20263f}
 @media(max-width:1050px){.page.home .hero{min-height:600px;background-position:center 52%}}
 @media(max-width:720px){.page.home .hero{min-height:650px;padding:38px 24px;background-position:52% center;border-radius:22px}.page.home .hero:before{background:linear-gradient(90deg,rgba(255,255,255,.96),rgba(255,255,255,.88) 61%,rgba(255,255,255,.48))}.page.home .hero .lead,.page.home .hero .search{max-width:100%}}
+.page.home .item-image>img{width:100%;height:100%;object-fit:contain;display:block}
