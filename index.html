@@ -38,12 +38,6 @@
     .auth-roles { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 21px; }
     .auth-role { height: 52px; border: 1px solid var(--line); border-radius: 14px; background: transparent; color: var(--muted); font: inherit; font-weight: 700; cursor: pointer; }
     .auth-role.active { border-color: #6255e8; background: #383475; color: #b9c4ff; }
-    .auth-divider { display: flex; align-items: center; gap: 13px; color: var(--muted); font-size: 13px; margin: 23px 0; }
-    .auth-divider::before, .auth-divider::after { content: ''; height: 1px; flex: 1; background: var(--line); }
-    .google-button { width: 100%; min-height: 52px; border: 1px solid var(--line); border-radius: 14px; background: transparent; color: var(--text); font: inherit; font-weight: 700; cursor: pointer; }
-    .google-button:hover { background: rgba(255,255,255,.04); }
-    .google-icon { width: 19px; height: 19px; object-fit: contain; vertical-align: -4px; margin-right: 8px; }
-    .auth-switch { background: none; border: 0; padding: 0; color: #adb7ff; font: inherit; font-weight: 700; cursor: pointer; }
     .logout-button { width: 100%; border: 1px solid rgba(255, 93, 110, .42); border-radius: 9px; padding: 9px 10px; color: #ff8791; background: rgba(255, 78, 91, .08); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
     .logout-button:hover { background: rgba(255, 78, 91, .16); }
     #app-shell[hidden], #auth-root[hidden] { display: none !important; }
@@ -56,10 +50,10 @@
     <aside class="sidebar" id="sidebar">
       <div class="brand"><img class="brand-logo" src="images/logo_nexusfind.png" alt="NexusFind logo" /><span class="brand-name">Nexus<span>Find</span></span><button class="collapse" aria-label="Collapse navigation">←</button></div>
       <nav class="nav" aria-label="Main navigation">
-        <button class="nav-link active" data-page="home"><i>⌂</i>Home</button>
-        <button class="nav-link" data-page="browse"><i>⦿</i>Browse Items</button>
-        <button class="nav-link" data-page="lost"><i>□</i>Report Lost</button>
-        <button class="nav-link" data-page="found"><i>☑</i>Report Found</button>
+        <button class="nav-link active" data-page="home"><i><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1Z"/></svg></i>Home</button>
+        <button class="nav-link" data-page="browse"><i><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></i>Browse Items</button>
+        <button class="nav-link" data-page="lost"><i><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5v6l10 10 8-8L11 3H5a2 2 0 0 0-2 2Z"/><circle cx="7.5" cy="7.5" r=".75"/><path d="M14.5 11.5a1.5 1.5 0 1 1 2.2 1.3c-.7.4-1.2.8-1.2 1.7M15.5 17h.01"/></svg></i>Report Lost</button>
+        <button class="nav-link" data-page="found"><i><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h16v12H4zM4 8l3-4h10l3 4M12 4v4"/><path d="m8.5 14 2.2 2.2 4.8-4.8"/></svg></i>Report Found</button>
         <button class="nav-link notify-link" data-page="notifications"><i>🔔<b>3</b></i>Notifications <em>3</em></button>
       </nav>
       <div class="sidebar-bottom"><a href="#">My Reports</a><a href="#">About</a><button class="theme-button" id="themeToggle">☀ <span>Light mode</span></button><button class="logout-button" id="logoutButton" type="button">Log out</button></div>

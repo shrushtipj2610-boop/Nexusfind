@@ -1,5 +1,5 @@
-import { getDownloadURL, getStorage, ref, uploadBytesResumable } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js';
-import { app, auth, isConfigured } from './firebase.js';
+import { getDownloadURL, ref, uploadBytesResumable } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js';
+import { auth, isConfigured, storage } from './firebase.js';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png'];
@@ -12,12 +12,47 @@ export function validateItemImage(file) {
 
 export async function uploadItemImage(file, onProgress) {
   if (!file) return null;
-  if (!isConfigured || !app || !auth) throw new Error('Firebase Storage is not configured.');
+  if (!isConfigured || !storage || !auth) throw new Error('Firebase Storage is not configured.');
   validateItemImage(file);
-  if (!auth.currentUser?.uid) throw new Error('Please sign in before uploading an image.');
-  const storage = getStorage(app);
-  const objectPath = `item-images/${auth.currentUser.uid}/${crypto.randomUUID()}.${file.type === 'image/png' ? 'png' : 'jpg'}`;
+  const user = auth.currentUser;
+  if (!user?.uid) throw new Error('Please sign in before uploading an image.');
+
+  // Refresh the Firebase Auth token before creating the Storage task. This is
+  // important immediately after sign-in, when Storage otherwise may begin a
+  // request without the authenticated token required by storage.rules.
+  await user.getIdToken();
+  const objectPath = `item-images/${user.uid}/${crypto.randomUUID()}.${file.type === 'image/png' ? 'png' : 'jpg'}`;
   const task = uploadBytesResumable(ref(storage, objectPath), file, { contentType: file.type });
-  await new Promise((resolve, reject) => task.on('state_changed', (snapshot) => onProgress?.(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)), (error) => reject(new Error(error.message || 'Firebase Storage could not upload this image.')), resolve));
-  return getDownloadURL(task.snapshot.ref);
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      const message = error?.message || 'Firebase Storage could not upload this image.';
+      reject(new Error(message));
+    };
+
+    task.on('state_changed',
+      (snapshot) => {
+        const total = snapshot.totalBytes || file.size;
+        const progress = total ? Math.round((snapshot.bytesTransferred / total) * 100) : 0;
+        onProgress?.(Math.min(100, Math.max(0, progress)));
+      },
+      fail,
+      async () => {
+        try {
+          const url = await getDownloadURL(task.snapshot.ref);
+          const parsedUrl = new URL(url);
+          if (!/^https?:$/.test(parsedUrl.protocol)) throw new Error('Firebase returned an invalid image URL.');
+          if (settled) return;
+          settled = true;
+          onProgress?.(100);
+          resolve(url);
+        } catch (error) {
+          fail(error);
+        }
+      }
+    );
+  });
 }

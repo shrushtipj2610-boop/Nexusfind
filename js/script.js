@@ -16,22 +16,24 @@ const reportDate = (report) => report.dateFound || report.dateLost || 'Date not 
 const itemImageCategories = {
   'id-card': { aliases: ['college id', 'identity card', 'student id', 'id card'], src: 'images/collegeid.png', alt: 'Student or college identification card' },
   audio: { aliases: ['earphone', 'earphones', 'earbud', 'earbuds', 'headphone', 'headphones', 'airpod', 'airpods'], src: 'images/airpods.jpeg', alt: 'Wireless earbuds' },
+  'laptop-charger': { aliases: ['laptop charger', 'charger', 'notebook charger', 'laptop adapter'], src: 'images/charger%20laptop.png', alt: 'Laptop charger and power adapter' },
   keys: { aliases: ['key', 'keys', 'keychain', 'keychains'], src: 'images/keys.jpeg', alt: 'Set of keys on a keyring' },
   documents: { aliases: ['documents', 'document', 'personal file', 'file'], src: 'images/document.jpeg', alt: 'Personal documents in a file' },
   'water-bottle': { aliases: ['water bottle'], src: 'images/bottle.jpeg', alt: 'Reusable water bottle' }
 };
 const normalizeItemName = (value = '') => ` ${String(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
-const getItemImageCategory = (itemName) => {
-  const normalizedName = normalizeItemName(itemName);
-  return Object.entries(itemImageCategories).find(([, category]) => category.aliases.some((alias) => normalizedName.includes(` ${alias} `)))?.[0];
+const getItemImageCategory = (itemName, category = '') => {
+  const normalizedItem = normalizeItemName(itemName);
+  const normalizedCategory = normalizeItemName(category);
+  return Object.entries(itemImageCategories).find(([, imageCategory]) => imageCategory.aliases.some((alias) => normalizedItem.includes(` ${alias} `) || normalizedCategory.includes(` ${alias} `)))?.[0];
 };
-const getItemImage = (itemName) => {
-  const category = getItemImageCategory(itemName);
+const getItemImage = (itemName, reportCategory = '') => {
+  const category = getItemImageCategory(itemName, reportCategory);
   return category ? itemImageCategories[category] : null;
 };
 const persistedItemCard = (report, { localImages = true } = {}) => {
   const type = report.type === 'found' ? 'found' : 'lost';
-  const itemImage = localImages ? getItemImage(report.itemName) : null;
+  const itemImage = localImages ? getItemImage(report.itemName, report.category) : null;
   const visual = itemImage ? `<img src="${itemImage.src}" alt="${itemImage.alt}">` : '';
   return `<article class="card item-card"><div class="item-image ${type}"><span class="badge ${type}">${type[0].toUpperCase() + type.slice(1)}</span>${visual}</div><div class="item-content"><h3>${escapeHtml(report.itemName)}</h3><p>${escapeHtml(report.description)}</p><div class="place">${escapeHtml(report.location || 'Location not provided')}</div><div class="meta"><span class="tag">${escapeHtml(report.category)}</span><span>${escapeHtml(reportDate(report))}</span></div><button class="small-button view-report" data-report-id="${escapeHtml(report.id)}" type="button">View Details</button></div></article>`;
 };
@@ -109,29 +111,24 @@ function renderLostStep(step) {
 }
 
 function found() {
-  root.innerHTML = shell(`${reportHeader('found')}<form class="form-card" id="foundForm"><div class="form-grid"><div class="field"><label>Item Name</label><input class="input" id="foundItemName" placeholder="e.g. Silver water bottle" required></div><div class="field"><label>Category</label><select id="foundCategory" required><option value="">Select category</option><option>Electronics</option><option>Keys</option><option>Bags & Backpacks</option><option>ID Cards</option><option>Personal Items</option></select></div><div class="field wide"><label>Description</label><textarea id="foundDescription" placeholder="Describe distinguishing features..." required></textarea></div><div class="field wide"><label>Upload Image</label><label class="upload"><span><span class="upload-icon">⇧</span><b>Click to upload · PNG, JPG up to 5MB</b></span><input id="foundImage" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" hidden></label><p class="upload-status" id="foundImageStatus" role="status" aria-live="polite"></p><img class="upload-preview" id="foundImagePreview" alt="Uploaded image preview" hidden></div><div class="field"><label>Location Found</label><input class="input" id="foundLocation" placeholder="e.g. Cafeteria" required></div><div class="field"><label>Date Found</label><input type="date" class="input" id="foundDate" required></div><div class="field wide"><label>Current Storage Location</label><input class="input" id="foundStorage" placeholder="e.g. Security desk, Block A" required></div></div><div class="form-actions"><span></span><button class="button" type="submit">Submit found item</button></div></form>`, 'form-page');
-  const form = $('#foundForm'); const imageInput = $('#foundImage');
-  const imageStatus = $('#foundImageStatus'); const preview = $('#foundImagePreview');
-  let selectedImage = null; let uploadedImageUrl = null; let uploadPromise = null; let uploadVersion = 0;
-  imageInput.onchange = () => {
-    const file = imageInput.files[0];
-    const version = ++uploadVersion;
-    selectedImage = file || null; uploadedImageUrl = null; preview.hidden = true; preview.removeAttribute('src');
-    if (!file) { imageStatus.textContent = ''; return; }
-    imageStatus.textContent = `Uploading ${file.name}… 0%`;
-    uploadPromise = window.NexusFind.uploadItemImage(file, (progress) => { if (version === uploadVersion) imageStatus.textContent = `Uploading ${file.name}… ${progress}%`; })
-      .then((url) => { if (version === uploadVersion) { uploadedImageUrl = url; preview.src = url; preview.hidden = false; imageStatus.textContent = `Upload successful: ${file.name}`; } })
-      .catch((error) => { if (version === uploadVersion) { console.error('Unable to upload found item image:', error); imageStatus.textContent = `Upload failed: ${error.message}`; } });
-  };
+  root.innerHTML = shell(`${reportHeader('found')}<form class="form-card" id="foundForm"><div class="form-grid"><div class="field"><label>Item Name</label><input class="input" id="foundItemName" placeholder="e.g. Silver water bottle" required></div><div class="field"><label>Category</label><select id="foundCategory" required><option value="">Select category</option><option>Electronics</option><option>Keys</option><option>Bags & Backpacks</option><option>ID Cards</option><option>Personal Items</option></select></div><div class="field wide"><label>Description</label><textarea id="foundDescription" placeholder="Describe distinguishing features..." required></textarea></div><div class="field"><label>Location Found</label><input class="input" id="foundLocation" placeholder="e.g. Cafeteria" required></div><div class="field"><label>Date Found</label><input type="date" class="input" id="foundDate" required></div><div class="field wide"><label>Current Storage Location</label><input class="input" id="foundStorage" placeholder="e.g. Security desk, Block A" required></div></div><div class="form-actions"><span></span><button class="button" type="submit">Submit found item</button></div></form>`, 'form-page');
+  const form = $('#foundForm');
   form.onsubmit = async (event) => {
-    event.preventDefault(); if (!form.checkValidity()) { form.reportValidity(); return; }
-    if (uploadPromise) await uploadPromise;
-    if (selectedImage && !uploadedImageUrl) return;
-    const submitButton = $('button[type="submit"]', form); submitButton.disabled = true; submitButton.textContent = 'Submitting...';
+    event.preventDefault();
+    if (!form.checkValidity()) { form.reportValidity(); return; }
+    const submitButton = $('button[type="submit"]', form);
+    submitButton.disabled = true;
+    submitButton.textContent = 'Submitting...';
     try {
-      await window.NexusFind.createItemReport({ type: 'found', itemName: $('#foundItemName').value, category: $('#foundCategory').value, description: $('#foundDescription').value, location: $('#foundLocation').value, dateFound: $('#foundDate').value, storageLocation: $('#foundStorage').value }, null, uploadedImageUrl);
-      toast('Thank you for reporting this found item!'); render('browse');
-    } catch (error) { console.error('Unable to submit found report:', error); toast(`Unable to submit your found item: ${error.message}`); submitButton.disabled = false; submitButton.textContent = 'Submit found item'; }
+      await window.NexusFind.createItemReport({ type: 'found', itemName: $('#foundItemName').value, category: $('#foundCategory').value, description: $('#foundDescription').value, location: $('#foundLocation').value, dateFound: $('#foundDate').value, storageLocation: $('#foundStorage').value });
+      toast('Thank you for reporting this found item!');
+      render('browse');
+    } catch (error) {
+      console.error('Unable to submit found report:', error);
+      toast(`Unable to submit your found item: ${error.message}`);
+      submitButton.disabled = false;
+      submitButton.textContent = 'Submit found item';
+    }
   };
 }
 

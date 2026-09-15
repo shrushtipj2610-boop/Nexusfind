@@ -1,9 +1,8 @@
 import { collection, doc, getDoc, onSnapshot, serverTimestamp, updateDoc, writeBatch } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 import { db, isConfigured } from './firebase.js';
 import { getUserDetails } from './auth.js';
-import { uploadItemImage } from './storage.js';
 
-export async function createItemReport(report, imageFile = null, uploadedImageUrl = null) {
+export async function createItemReport(report) {
   if (!isConfigured || !db) {
     throw new Error('Firebase is not configured yet. Add your Firebase web configuration in js/firebase.js.');
   }
@@ -16,7 +15,7 @@ export async function createItemReport(report, imageFile = null, uploadedImageUr
     throw new Error('Please sign in before submitting a report.');
   }
 
-  const imageUrl = uploadedImageUrl || await uploadItemImage(imageFile);
+  const imageUrl = null;
   const itemDocument = {
     ...report,
     itemName: report.itemName.trim(),
