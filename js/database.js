@@ -1,5 +1,6 @@
-import { collection, doc, getDoc, onSnapshot, serverTimestamp, updateDoc, writeBatch } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
-import { db, isConfigured } from './firebase.js';
+import { collection, doc, getDoc, onSnapshot, query, serverTimestamp, updateDoc, where, writeBatch } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
+import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
+import { auth, db, isConfigured } from './firebase.js';
 import { getUserDetails } from './auth.js';
 
 export async function createItemReport(report) {
@@ -39,6 +40,7 @@ export async function createItemReport(report) {
     itemName: itemDocument.itemName,
     location: report.location.trim(),
     createdAt: serverTimestamp(),
+    userId: user.uid,
     read: false
   };
   // A single commit ensures a report cannot create duplicate notifications and
@@ -77,15 +79,28 @@ export async function getItemReport(id) {
 }
 
 export function watchNotifications(callback, onError) {
-  if (!isConfigured || !db) {
+  if (!isConfigured || !db || !auth) {
     onError?.(new Error('Firebase is not configured yet.'));
     return () => {};
   }
-  return onSnapshot(collection(db, 'notifications'), (snapshot) => {
-    const notifications = snapshot.docs.map((notification) => ({ id: notification.id, ...notification.data() }));
-    notifications.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
-    callback(notifications);
+  let stopNotificationSnapshot = () => {};
+  const stopAuthentication = onAuthStateChanged(auth, (user) => {
+    stopNotificationSnapshot();
+    if (!user) {
+      callback([]);
+      return;
+    }
+    const notificationsQuery = query(collection(db, 'notifications'), where('userId', '==', user.uid));
+    stopNotificationSnapshot = onSnapshot(notificationsQuery, (snapshot) => {
+      const notifications = snapshot.docs.map((notification) => ({ id: notification.id, ...notification.data() }));
+      notifications.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+      callback(notifications);
+    }, onError);
   }, onError);
+  return () => {
+    stopNotificationSnapshot();
+    stopAuthentication();
+  };
 }
 
 export async function markNotificationRead(id) {

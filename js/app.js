@@ -66,6 +66,9 @@ function renderCreateAccount(setupError = '', selectedRole = 'student') {
 async function showDashboard() {
   authRoot.hidden = true;
   appShell.hidden = false;
+  // The sidebar must never briefly show the placeholder badge before the
+  // authenticated Firestore inbox returns its real unread count.
+  document.querySelectorAll('.notify-link em, .notify-link i b').forEach((badge) => { badge.hidden = true; });
   document.querySelector('#logoutButton').disabled = false;
   if (!dashboardLoaded) {
     window.NexusFind = { createItemReport, getItemReport, markNotificationRead, watchItemReports, watchNotifications, currentUser: getCurrentUser, applyLogoTheme };
