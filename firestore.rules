@@ -34,15 +34,23 @@ service cloud.firestore {
     match /notifications/{notificationId} {
       allow read: if request.auth != null
         && resource.data.userId == request.auth.uid;
-      // A notification can only be created in the same atomic write as its
-      // report, and its ID must be that report's ID. This prevents standalone
-      // client-side notification writes and guarantees one notification/report.
+      // Report notifications are written after the report itself is confirmed.
+      // Their deterministic ID and ownership check preserve one notification/report.
       allow create: if request.auth != null
-        && notificationId == request.resource.data.reportId
         && request.resource.data.read == false
-        && request.resource.data.userId == request.auth.uid
-        && request.resource.data.type in ['lost_report', 'found_report']
-        && getAfter(/databases/$(database)/documents/items/$(request.resource.data.reportId)).data.userId == request.auth.uid;
+        && ((request.resource.data.type in ['lost_report', 'found_report']
+          && notificationId == request.resource.data.reportId
+          && request.resource.data.userId == request.auth.uid
+          && exists(/databases/$(database)/documents/items/$(request.resource.data.reportId))
+          && get(/databases/$(database)/documents/items/$(request.resource.data.reportId)).data.userId == request.auth.uid)
+        || (request.resource.data.type == 'potential_match'
+          && existsAfter(/databases/$(database)/documents/matches/$(request.resource.data.matchId))
+          && request.resource.data.userId in [getAfter(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.lostUserId, getAfter(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.foundUserId]
+          && request.auth.uid in [getAfter(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.lostUserId, getAfter(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.foundUserId])
+        || (request.resource.data.type == 'match_update'
+          && existsAfter(/databases/$(database)/documents/matches/$(request.resource.data.matchId))
+          && request.auth.uid in [getAfter(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.lostUserId, getAfter(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.foundUserId]
+          && request.resource.data.userId in [getAfter(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.lostUserId, getAfter(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.foundUserId]));
       // Students may only mark an unread notification as read; no notification
       // text, link, type, or ownership data can be altered.
       allow update: if request.auth != null
@@ -50,6 +58,38 @@ service cloud.firestore {
         && resource.data.read == false
         && request.resource.data.read == true
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow delete: if false;
+    }
+
+    match /matches/{matchId} {
+      // A signed-in client may read a missing deterministic ID during the
+      // duplicate-check transaction; existing match data stays participant-only.
+      allow get: if request.auth != null && (!exists(/databases/$(database)/documents/matches/$(matchId))
+        || request.auth.uid in [resource.data.lostUserId, resource.data.foundUserId]);
+      allow list: if request.auth != null
+        && request.auth.uid in [resource.data.lostUserId, resource.data.foundUserId];
+      allow create: if request.auth != null
+        && request.resource.data.status == 'potential'
+        && request.resource.data.score >= 60 && request.resource.data.score <= 100
+        && request.resource.data.lostReportId != request.resource.data.foundReportId
+        && matchId == request.resource.data.lostReportId + '_' + request.resource.data.foundReportId
+        && request.auth.uid in [request.resource.data.lostUserId, request.resource.data.foundUserId]
+        && get(/databases/$(database)/documents/items/$(request.resource.data.lostReportId)).data.type == 'lost'
+        && get(/databases/$(database)/documents/items/$(request.resource.data.foundReportId)).data.type == 'found'
+        && get(/databases/$(database)/documents/items/$(request.resource.data.lostReportId)).data.userId == request.resource.data.lostUserId
+        && get(/databases/$(database)/documents/items/$(request.resource.data.foundReportId)).data.userId == request.resource.data.foundUserId;
+      allow update: if request.auth != null
+        && request.auth.uid in [resource.data.lostUserId, resource.data.foundUserId]
+        && ((resource.data.status == 'potential'
+          && request.resource.data.status == 'potential'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['score', 'matchedFields', 'updatedAt'])
+          && request.resource.data.score >= resource.data.score && request.resource.data.score <= 100)
+          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'claimedBy', 'updatedAt'])
+          && ((resource.data.status == 'potential' && request.resource.data.status in ['claim_requested', 'rejected']
+            && (request.resource.data.status == 'rejected' || request.resource.data.claimedBy == request.auth.uid))
+          || (resource.data.status == 'claim_requested' && request.resource.data.status in ['confirmed', 'rejected']
+            && (request.resource.data.status == 'rejected' || (request.resource.data.claimedBy == resource.data.claimedBy && request.auth.uid != resource.data.claimedBy)))
+          || (resource.data.status == 'confirmed' && request.resource.data.status == 'resolved'))));
       allow delete: if false;
     }
   }

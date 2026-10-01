@@ -1,4 +1,4 @@
-import { createItemReport, getItemReport, markNotificationRead, watchItemReports, watchNotifications } from './database.js';
+import { createItemReport, getItemReport, markNotificationRead, watchItemReports, watchNotifications, watchMatchesForUser, getMatchDetails, updateMatchStatus } from './database.js';
 import { getCurrentUser, logout, signUp, watchAuthentication } from './auth.js';
 
 const authRoot = document.querySelector('#auth-root');
@@ -71,7 +71,7 @@ async function showDashboard() {
   document.querySelectorAll('.notify-link em, .notify-link i b').forEach((badge) => { badge.hidden = true; });
   document.querySelector('#logoutButton').disabled = false;
   if (!dashboardLoaded) {
-    window.NexusFind = { createItemReport, getItemReport, markNotificationRead, watchItemReports, watchNotifications, currentUser: getCurrentUser, applyLogoTheme };
+    window.NexusFind = { createItemReport, getItemReport, markNotificationRead, watchItemReports, watchNotifications, watchMatchesForUser, getMatchDetails, updateMatchStatus, currentUser: getCurrentUser, applyLogoTheme };
     await import('./script.js');
     dashboardLoaded = true;
   }
