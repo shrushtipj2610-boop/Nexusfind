@@ -1,75 +1,48 @@
-import { collection, doc, getDoc, onSnapshot, query, serverTimestamp, updateDoc, where, runTransaction, getDocs, setDoc } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
+import { collection, doc, getDoc, onSnapshot, query, serverTimestamp, updateDoc, where, runTransaction, getDocs, setDoc, writeBatch } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 import { auth, db, isConfigured } from './firebase.js';
 import { getUserDetails } from './auth.js';
 import { uploadItemImage } from './storage.js';
-
-const normalize = (value = '') => String(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
-const synonyms = { mobile: 'phone', cellphone: 'phone', handset: 'phone', sneakers: 'shoes', spectacles: 'glasses', earphones: 'earbuds' };
-const tokens = (value = '') => new Set(normalize(value).split(' ').filter((word) => word.length > 1).map((word) => synonyms[word] || word));
-function similarity(a, b) {
-  const left = tokens(a), right = tokens(b);
-  if (!left.size || !right.size) return 0;
-  let common = 0;
-  left.forEach((word) => { if (right.has(word)) common += 1; });
-  return common / Math.max(left.size, right.size);
-}
-function scoreReports(a, b) {
-  const fields = [];
-  let score = 0;
-  const add = (name, points, threshold) => { if (points > 0) score += points; if (points >= threshold) fields.push(name); };
-  const category = normalize(a.category) && normalize(a.category) === normalize(b.category);
-  add('category', category ? 20 : 0, 15);
-  const nameSimilarity = similarity(a.itemName, b.itemName);
-  add('itemName', Math.round(nameSimilarity * 25), 13);
-  const descriptionSimilarity = similarity(a.description, b.description);
-  add('description', Math.round(descriptionSimilarity * 20), 10);
-  const locationSimilarity = similarity(a.location, b.location);
-  add('location', Math.round(locationSimilarity * 20), 10);
-  const dateA = a.dateLost || a.dateFound || '', dateB = b.dateLost || b.dateFound || '';
-  let datePoints = 0;
-  if (dateA && dateB) {
-    const delta = Math.abs(Date.parse(`${dateA}T00:00:00Z`) - Date.parse(`${dateB}T00:00:00Z`)) / 86400000;
-    datePoints = delta === 0 ? 10 : delta <= 1 ? 8 : delta <= 3 ? 5 : delta <= 7 ? 2 : 0;
-  }
-  add('date', datePoints, 5);
-  const identifying = similarity([a.identifyingDetails, a.landmark, a.approximateTime].filter(Boolean).join(' '), [b.identifyingDetails, b.landmark, b.approximateTime].filter(Boolean).join(' '));
-  add('identifyingDetails', Math.round(identifying * 5), 2);
-  return { score: Math.min(100, score), matchedFields: [...new Set(fields)] };
-}
+import { calculateMatchScore } from './matching.js';
 
 function matchKey(lostId, foundId) { return `${lostId}_${foundId}`; }
 
 async function createPotentialMatches(reportId, report) {
   try {
+    console.info('[MATCHING] Started:', { reportId, type: report.type });
     const opposite = report.type === 'lost' ? 'found' : 'lost';
     const candidates = await getDocs(query(collection(db, 'items'), where('type', '==', opposite)));
+    console.info('[MATCHING] Opposite-type candidates:', candidates.size, { type: opposite });
     for (const candidateSnapshot of candidates.docs) {
       const other = { id: candidateSnapshot.id, ...candidateSnapshot.data() };
-      if (!other.userId || other.userId === report.userId || ['resolved', 'returned'].includes(other.status)) continue;
+      if (other.type !== opposite || other.id === reportId || !other.userId
+        || ['returned', 'resolved', 'closed', 'rejected', 'archived'].includes(String(other.status || '').toLowerCase())) continue;
       const lost = report.type === 'lost' ? { ...report, id: reportId } : other;
       const found = report.type === 'found' ? { ...report, id: reportId } : other;
-      const { score, matchedFields } = scoreReports(lost, found);
+      const { score, matchedFields, matchLevel } = calculateMatchScore(lost, found);
+      console.info('[MATCHING] Candidate scored:', { candidateId: other.id, score, matchedFields });
       if (score < 60) continue;
       const id = matchKey(lost.id, found.id);
       const matchRef = doc(db, 'matches', id);
+      console.info('[MATCHING] Creating or refreshing match:', { matchId: id, lostReportId: lost.id, foundReportId: found.id, score });
       await runTransaction(db, async (transaction) => {
         const existing = await transaction.get(matchRef);
         if (existing.exists()) {
           if (existing.data().status === 'potential' && score > (existing.data().score || 0)) transaction.update(matchRef, { score, matchedFields, updatedAt: serverTimestamp() });
           return;
         }
-        transaction.set(matchRef, { lostReportId: lost.id, foundReportId: found.id, lostUserId: lost.userId, foundUserId: found.userId, score, matchedFields, status: 'potential', createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+        transaction.set(matchRef, { lostReportId: lost.id, foundReportId: found.id, lostUserId: lost.userId, foundUserId: found.userId, score, matchLevel, matchedFields, status: 'potential', createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
         const notice = (recipientId, ownReport, counterpart) => {
           const notificationRef = doc(collection(db, 'notifications'));
-          transaction.set(notificationRef, { type: 'potential_match', title: 'Potential match found', message: `Your ${ownReport.type} item “${ownReport.itemName}” may match “${counterpart.itemName || 'a reported item'}”. Match confidence: ${score}%.`, userId: recipientId, reportId: reportId, matchId: id, itemName: ownReport.itemName, read: false, createdAt: serverTimestamp() });
+          transaction.set(notificationRef, { type: 'potential_match', title: matchLevel === 'strong' ? 'Strong match found' : 'Possible match found', message: `${matchLevel === 'strong' ? 'Strong' : 'Possible'} match found for your ${ownReport.type} item: ${ownReport.itemName}. Score: ${score}%.`, userId: recipientId, reportId: reportId, matchId: id, itemName: ownReport.itemName, read: false, createdAt: serverTimestamp() });
         };
         notice(lost.userId, lost, found);
-        notice(found.userId, found, lost);
+        if (found.userId !== lost.userId) notice(found.userId, found, lost);
       });
+      console.info('[MATCHING] Match saved:', id);
     }
   } catch (error) {
-    console.error('Potential match creation failed; report was saved:', error);
+    console.error('[MATCHING] Match search or write failed; report remains saved:', error);
     return false;
   }
   return true;
@@ -89,17 +62,31 @@ export async function createItemReport(report = {}) {
     throw new Error('Please sign in before submitting a report.');
   }
 
-  const { imageFile, ...reportFields } = report;
+  let imageUrl = report.imageUrl || null;
+  if (report.imageFile) {
+    try {
+      console.info('[IMAGE] Upload started');
+      imageUrl = await uploadItemImage(report.imageFile);
+      if (!imageUrl) throw new Error('Firebase Storage returned no image URL.');
+      console.info('[IMAGE] Upload completed');
+    } catch (error) {
+      console.error('[IMAGE] Upload failed; report was not saved:', error);
+      throw new Error('Image upload failed. Please try again.', { cause: error });
+    }
+  }
+
+  const { imageFile, identifyingDetails, ...reportFields } = report;
   const itemDocument = {
     ...reportFields,
     itemName: report.itemName.trim(),
     description: report.description.trim(),
-    imageUrl: report.imageUrl || null,
+    imageUrl,
     status: report.status || report.type,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     userId: user.uid
   };
+  console.info('[REPORT] Saving image URL:', Boolean(imageUrl));
   const reference = doc(collection(db, 'items'));
   const notificationReference = doc(db, 'notifications', reference.id);
   const reportType = report.type === 'found' ? 'found' : 'lost';
@@ -114,17 +101,22 @@ export async function createItemReport(report = {}) {
     userId: user.uid,
     read: false
   };
-  // The report is the required operation. Optional image, notification, and
-  // matching work starts only after Firestore confirms this write and cannot
-  // keep the user on the submission screen.
+  // The selected image must finish uploading before the report is written so
+  // a report cannot silently lose its chosen image. Notifications and matching
+  // remain independent best-effort tasks after the confirmed report write.
   console.info('[REPORT] Creating Firebase report');
-  await setDoc(reference, itemDocument);
+  const reportBatch = writeBatch(db);
+  reportBatch.set(reference, itemDocument);
+  if (typeof identifyingDetails === 'string' && identifyingDetails.trim()) {
+    reportBatch.set(doc(db, 'privateItemDetails', reference.id), {
+      userId: user.uid,
+      identifyingDetails: identifyingDetails.trim(),
+      createdAt: serverTimestamp()
+    });
+  }
+  await reportBatch.commit();
   console.info('[REPORT] Firebase report created:', reference.id);
 
-  if (imageFile) {
-    void uploadItemImage(imageFile).then((imageUrl) => updateDoc(reference, { imageUrl, updatedAt: serverTimestamp() }))
-      .catch((error) => console.error('[REPORT] Optional image upload failed:', error));
-  }
   void setDoc(notificationReference, notificationDocument)
     .catch((error) => console.error('[REPORT] Report notification could not be created:', error));
   void createPotentialMatches(reference.id, itemDocument);
@@ -138,7 +130,9 @@ export function watchMatchesForUser(callback, onError) {
     stops.forEach((stop) => stop()); stops = [];
     if (!user) { callback([]); return; }
     const collected = new Map();
-    const publish = () => callback([...collected.values()].sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)));
+    const publish = () => callback([...collected.values()].sort((a, b) =>
+      (Number(b.score) || 0) - (Number(a.score) || 0)
+      || (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)));
     for (const field of ['lostUserId', 'foundUserId']) {
       stops.push(onSnapshot(query(collection(db, 'matches'), where(field, '==', user.uid)), (snapshot) => {
         snapshot.docChanges().forEach((change) => { if (change.type === 'removed') collected.delete(change.doc.id); else collected.set(change.doc.id, { id: change.doc.id, ...change.doc.data() }); });

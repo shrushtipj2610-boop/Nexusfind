@@ -31,6 +31,21 @@ service cloud.firestore {
         && resource.data.userId == request.auth.uid;
     }
 
+    // Ownership verification details are stored separately from browseable
+    // reports so only the report author can read them.
+    match /privateItemDetails/{itemId} {
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.keys().hasOnly(['userId', 'identifyingDetails', 'createdAt'])
+        && request.resource.data.identifyingDetails is string;
+      allow update: if request.auth != null
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['identifyingDetails']);
+      allow delete: if false;
+    }
+
     match /notifications/{notificationId} {
       allow read: if request.auth != null
         && resource.data.userId == request.auth.uid;

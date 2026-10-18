@@ -14,28 +14,98 @@ let notificationsData = [];
 let matchesData = [];
 const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]);
 const reportDate = (report) => report.dateFound || report.dateLost || 'Date not provided';
-const itemImageCategories = {
-  'id-card': { aliases: ['college id', 'identity card', 'student id', 'id card'], src: 'images/collegeid.png', alt: 'Student or college identification card' },
-  audio: { aliases: ['earphone', 'earphones', 'earbud', 'earbuds', 'headphone', 'headphones', 'airpod', 'airpods'], src: 'images/airpods.jpeg', alt: 'Wireless earbuds' },
-  'laptop-charger': { aliases: ['laptop charger', 'charger', 'notebook charger', 'laptop adapter'], src: 'images/charger%20laptop.png', alt: 'Laptop charger and power adapter' },
-  keys: { aliases: ['key', 'keys', 'keychain', 'keychains'], src: 'images/keys.jpeg', alt: 'Set of keys on a keyring' },
-  documents: { aliases: ['documents', 'document', 'personal file', 'file'], src: 'images/document.jpeg', alt: 'Personal documents in a file' },
-  'water-bottle': { aliases: ['water bottle'], src: 'images/bottle.jpeg', alt: 'Reusable water bottle' }
+const localItemImages = [
+  { aliases: ['college id card', 'college id', 'student id', 'identity card', 'id card'], src: '/images/collegeid.png', alt: 'Student or college identification card' },
+  { aliases: ['laptop charger', 'charger laptop', 'notebook charger', 'laptop adapter', 'charger'], src: '/images/charger%20laptop.png', alt: 'Laptop charger and power adapter' },
+  { aliases: ['airpods', 'airpod'], src: '/images/airpods.jpeg', alt: 'AirPods' },
+  { aliases: ['earbuds', 'earbud', 'ear buds', 'ear bud', 'earphones', 'earphone', 'headphones', 'headphone'], src: '/images/earbuds.jpeg', alt: 'Earbuds' },
+  { aliases: ['keys', 'key', 'keychain', 'keychains'], src: '/images/keys.jpeg', alt: 'Set of keys on a keyring' },
+  { aliases: ['document', 'documents', 'personal file', 'file'], src: '/images/document.jpeg', alt: 'Personal documents' },
+  { aliases: ['bottle'], src: '/images/bottle.jpeg', alt: 'Reusable water bottle' }
+];
+const normalizeItemName = (value = '') => ` ${String(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ').replace(/\bear\s+buds?\b/g, 'earbuds').replace(/\bearphones?\b/g, 'earbuds')} `;
+const getLocalItemImage = (report = {}) => {
+  const normalized = `${normalizeItemName(report.itemName)} ${normalizeItemName(report.category)} ${normalizeItemName(report.description)}`;
+  return localItemImages.find((image) => image.aliases.some((alias) => normalized.includes(normalizeItemName(alias)))) || null;
 };
-const normalizeItemName = (value = '') => ` ${String(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
-const getItemImageCategory = (itemName, category = '') => {
-  const normalizedItem = normalizeItemName(itemName);
-  const normalizedCategory = normalizeItemName(category);
-  return Object.entries(itemImageCategories).find(([, imageCategory]) => imageCategory.aliases.some((alias) => normalizedItem.includes(` ${alias} `) || normalizedCategory.includes(` ${alias} `)))?.[0];
+const getReportImage = (report = {}) => {
+  const uploadedImage = [report.imageUrl, report.image].find((value) => typeof value === 'string' && value.trim());
+  return uploadedImage?.trim() || getLocalItemImage(report)?.src || null;
 };
-const getItemImage = (itemName, reportCategory = '') => {
-  const category = getItemImageCategory(itemName, reportCategory);
-  return category ? itemImageCategories[category] : null;
+const reportImageMarkup = (url, itemName, className = '') => url
+  ? `<img class="${className}" data-report-image src="${escapeHtml(url)}" alt="${escapeHtml(itemName || 'Reported item')}">`
+  : '<span class="image-placeholder" role="img" aria-label="No image available">No image available</span>';
+const reportImageFor = (report = {}, className = '') => {
+  const url = getReportImage(report);
+  if (!url) return reportImageMarkup(null, report.itemName, className);
+  const uploaded = report.imageUrl || report.image;
+  const local = uploaded ? getLocalItemImage(report)?.src : null;
+  return `<img class="${className}" data-report-image${local ? ` data-local-fallback="${local}"` : ''} src="${escapeHtml(url)}" alt="${escapeHtml(report.itemName || 'Reported item')}">`;
 };
-const persistedItemCard = (report, { localImages = true } = {}) => {
+const bindReportImageFallback = (container = document) => container.querySelectorAll('img[data-report-image]').forEach((image) => image.addEventListener('error', () => {
+  if (image.dataset.localFallback && image.src !== new URL(image.dataset.localFallback, document.baseURI).href) {
+    image.src = image.dataset.localFallback;
+    delete image.dataset.localFallback;
+    return;
+  }
+  let imageUrl = image.currentSrc || image.src;
+  try { const safeUrl = new URL(imageUrl); safeUrl.search = ''; imageUrl = safeUrl.href; } catch { /* Keep non-URL image paths readable in logs. */ }
+  console.warn('[REPORT IMAGE] Image URL failed to load:', { itemName: image.alt, imageUrl });
+  const placeholder = document.createElement('span');
+  placeholder.className = 'image-placeholder image-placeholder-error';
+  placeholder.textContent = 'Image unavailable';
+  image.replaceWith(placeholder);
+}));
+const imagePreviewUrls = new Map();
+function releaseImagePreview(file) {
+  const url = imagePreviewUrls.get(file);
+  if (url) URL.revokeObjectURL(url);
+  imagePreviewUrls.delete(file);
+}
+function bindImagePreview(input, preview, getFile, setFile) {
+  const render = () => {
+    const file = getFile();
+    preview.replaceChildren();
+    if (!file) return;
+    let url = imagePreviewUrls.get(file);
+    if (!url) { url = URL.createObjectURL(file); imagePreviewUrls.set(file, url); }
+    const image = document.createElement('img');
+    image.src = url;
+    image.alt = 'Selected item image preview';
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'small-button';
+    remove.textContent = 'Remove image';
+    remove.onclick = () => {
+      setFile(null);
+      input.value = '';
+      releaseImagePreview(file);
+      render();
+    };
+    preview.append(image, remove);
+  };
+  input.onchange = () => {
+    const file = input.files?.[0] || null;
+    if (!file) { render(); return; }
+    const previousFile = getFile();
+    if (!['image/jpeg', 'image/png'].includes(file.type) || file.size > 5 * 1024 * 1024) {
+      setFile(null);
+      if (previousFile) releaseImagePreview(previousFile);
+      input.value = '';
+      preview.textContent = file.size > 5 * 1024 * 1024 ? 'Image size must be 5MB or less.' : 'Choose a PNG or JPG image.';
+      preview.classList.add('image-preview-error');
+      return;
+    }
+    preview.classList.remove('image-preview-error');
+    if (previousFile && previousFile !== file) releaseImagePreview(previousFile);
+    setFile(file);
+    render();
+  };
+  render();
+}
+const persistedItemCard = (report) => {
   const type = report.type === 'found' ? 'found' : 'lost';
-  const itemImage = localImages ? getItemImage(report.itemName, report.category) : null;
-  const visual = report.imageUrl ? `<img src="${escapeHtml(report.imageUrl)}" alt="${escapeHtml(report.itemName || 'Reported item')}">` : itemImage ? `<img src="${itemImage.src}" alt="${itemImage.alt}">` : '';
+  const visual = reportImageFor(report);
   return `<article class="card item-card"><div class="item-image ${type}"><span class="badge ${type}">${type[0].toUpperCase() + type.slice(1)}</span>${visual}</div><div class="item-content"><h3>${escapeHtml(report.itemName)}</h3><p>${escapeHtml(report.description)}</p><div class="place">${escapeHtml(report.location || 'Location not provided')}</div><div class="meta"><span class="tag">${escapeHtml(report.category)}</span><span>${escapeHtml(reportDate(report))}</span></div><button class="small-button view-report" data-report-id="${escapeHtml(report.id)}" type="button">View Details</button></div></article>`;
 };
 const shell = (body, cls='') => `<div class="page ${cls}">${body}</div>`;
@@ -69,35 +139,43 @@ async function showReportDetails(id) {
   try {
     const report = await window.NexusFind.getItemReport(id);
     const type = report.type === 'found' ? 'FOUND' : 'LOST';
-    root.innerHTML = shell(`<button class="back" id="detailsBack" type="button">← Back to Browse</button><article class="form-card"><span class="badge ${report.type}">${type}</span><h1 class="page-title">${escapeHtml(report.itemName)}</h1>${report.imageUrl ? `<img class="detail-image" src="${escapeHtml(report.imageUrl)}" alt="${escapeHtml(report.itemName)}">` : ''}<p>${escapeHtml(report.description)}</p><div class="summary"><strong>REPORT DETAILS</strong><br>Category: ${escapeHtml(report.category)}<br>Location: ${escapeHtml(report.location || 'Not provided')}<br>Date: ${escapeHtml(reportDate(report))}<br>Status: ${escapeHtml(report.status || report.type)}${report.storageLocation ? `<br>Storage location: ${escapeHtml(report.storageLocation)}` : ''}</div></article>`);
+    root.innerHTML = shell(`<button class="back" id="detailsBack" type="button">← Back to Browse</button><article class="form-card"><span class="badge ${report.type}">${type}</span><h1 class="page-title">${escapeHtml(report.itemName)}</h1><div class="detail-image-frame">${reportImageFor(report, 'detail-image')}</div><p>${escapeHtml(report.description)}</p><div class="summary"><strong>REPORT DETAILS</strong><br>Category: ${escapeHtml(report.category)}<br>Location: ${escapeHtml(report.location || 'Not provided')}<br>Date: ${escapeHtml(reportDate(report))}<br>Status: ${escapeHtml(report.status || report.type)}${report.storageLocation ? `<br>Storage location: ${escapeHtml(report.storageLocation)}` : ''}</div></article>`);
+    bindReportImageFallback(root);
     $('#detailsBack').onclick = () => render('browse');
   } catch (error) {
     toast('Unable to load this item. Please try again.');
   }
 }
-function bindDetails() { document.querySelectorAll('.view-report').forEach((button) => { button.onclick = () => showReportDetails(button.dataset.reportId); }); }
-const matchReason = (field) => ({ category: 'Same category', itemName: 'Similar item name', description: 'Similar description', location: 'Same or nearby location', date: 'Similar date', identifyingDetails: 'Similar identifying details' }[field] || field);
+function bindDetails() { document.querySelectorAll('.view-report').forEach((button) => { button.onclick = () => showReportDetails(button.dataset.reportId); }); bindReportImageFallback(); }
+const matchReason = (field) => ({ category: 'Same category', itemName: 'Similar item name', color: 'Similar color', description: 'Similar description', location: 'Same or nearby location', date: 'Similar date' }[field] || field);
+const matchLevel = (match) => match.matchLevel || (Number(match.score) >= 80 ? 'strong' : 'possible');
+const matchLabel = (match) => matchLevel(match) === 'strong' ? 'Strong Match' : 'Possible Match';
 function matchCard(match) {
   const current = window.NexusFind.currentUser?.();
   const ownIsLost = match.lostUserId === current?.uid;
   const own = persistedReports.find((report) => report.id === (ownIsLost ? match.lostReportId : match.foundReportId));
   const other = persistedReports.find((report) => report.id === (ownIsLost ? match.foundReportId : match.lostReportId));
   const display = other || own;
-  return `<article class="card match-card"><div class="match-card-top"><span class="badge ${ownIsLost ? 'found' : 'lost'}">${ownIsLost ? 'Found' : 'Lost'} match</span><strong>${Number(match.score) || 0}% match</strong></div><h3>${escapeHtml(display?.itemName || 'Report unavailable')}</h3><p>${escapeHtml(display?.description || 'Details unavailable')}</p><div class="place">${escapeHtml(display?.location || 'Location not provided')}</div><div class="meta"><span class="tag">${escapeHtml(display?.category || 'Category unavailable')}</span><span>${escapeHtml(reportDate(display || {}))}</span></div><p class="match-status">Status: ${escapeHtml((match.status || 'potential').replace('_', ' '))}</p><div class="match-reasons">${(match.matchedFields || []).map((field) => `<span>✓ ${escapeHtml(matchReason(field))}</span>`).join('')}</div><button class="small-button view-match" data-match-id="${escapeHtml(match.id)}" type="button">View Match</button></article>`;
+  const lost = persistedReports.find((report) => report.id === match.lostReportId);
+  const found = persistedReports.find((report) => report.id === match.foundReportId);
+  const evidence = [lost, found].filter((report) => report && getReportImage(report)).map((report) => `<div class="match-image"><span>${report.type === 'lost' ? 'Lost image' : 'Found image'}</span>${reportImageFor(report)}</div>`).join('');
+  return `<article class="card match-card"><div class="match-card-top"><span class="match-level-badge ${matchLevel(match)}">${matchLabel(match)}</span><strong>${Number(match.score) || 0}% match</strong></div>${evidence ? `<div class="match-card-images">${evidence}</div>` : ''}<h3>${escapeHtml(display?.itemName || 'Report unavailable')}</h3><div class="place">${escapeHtml(display?.location || 'Location not provided')}</div><div class="meta"><span class="tag">${escapeHtml(display?.category || 'Category unavailable')}</span><span>${escapeHtml(reportDate(display || {}))}</span></div>${display?.color ? `<p class="match-color">Color: ${escapeHtml(display.color)}</p>` : ''}<p class="match-status">Status: ${escapeHtml((match.status || 'potential').replace('_', ' '))}</p><div class="match-reasons">${(match.matchedFields || []).map((field) => `<span>✓ ${escapeHtml(matchReason(field))}</span>`).join('')}</div><button class="small-button view-match" data-match-id="${escapeHtml(match.id)}" type="button">View Details</button></article>`;
 }
 async function showMatchDetails(id) {
   try {
     const match = await window.NexusFind.getMatchDetails(id);
     const current = window.NexusFind.currentUser?.();
     const isParticipant = [match.lostUserId, match.foundUserId].includes(current?.uid);
+    const sameReporter = match.lostUserId === match.foundUserId;
     const status = match.status || 'potential';
     const ownClaim = match.claimedBy === current?.uid;
     const actions = !isParticipant ? '' : status === 'potential'
-      ? '<button class="button match-action" data-action="claim" type="button">This is My Item</button><button class="small-button match-action" data-action="reject" type="button">Not a Match</button>'
+      ? sameReporter ? '<p class="subtitle">Both reports are from your account. Review the details to verify this suggestion.</p><button class="small-button match-action" data-action="reject" type="button">Not a Match</button>' : '<button class="button match-action" data-action="claim" type="button">This is My Item</button><button class="small-button match-action" data-action="reject" type="button">Not a Match</button>'
       : status === 'claim_requested' ? (ownClaim ? '<p class="subtitle">Claim request sent. Waiting for the other reporter.</p>' : '<button class="button match-action" data-action="confirm" type="button">Confirm Match</button><button class="small-button match-action" data-action="reject" type="button">Not a Match</button>')
       : status === 'confirmed' ? '<button class="button match-action" data-action="resolve" type="button">Mark as Recovered</button>' : '';
-    const reportSection = (title, report) => `<section class="match-report"><h2>${title}</h2><span class="badge ${report.type}">${report.type === 'lost' ? 'Lost report' : 'Found report'}</span>${report.imageUrl ? `<img class="detail-image" src="${escapeHtml(report.imageUrl)}" alt="${escapeHtml(report.itemName)}">` : ''}<h3>${escapeHtml(report.itemName || 'Item')}</h3><p><b>Category:</b> ${escapeHtml(report.category || 'Not provided')}</p><p><b>Location:</b> ${escapeHtml(report.location || 'Not provided')}</p><p><b>Date:</b> ${escapeHtml(reportDate(report))}${report.approximateTime ? ` · ${escapeHtml(report.approximateTime)}` : ''}</p><p><b>Description:</b> ${escapeHtml(report.description || 'Not provided')}</p>${report.identifyingDetails ? `<p><b>Identifying details:</b> ${escapeHtml(report.identifyingDetails)}</p>` : ''}</section>`;
-    root.innerHTML = shell(`<button class="back" id="matchesBack" type="button">← Back to My Reports</button><h1 class="page-title">Potential Match</h1><p class="subtitle">Please verify these details. This is a suggested connection, not confirmation that the item has been recovered.</p><div class="match-score-panel"><strong>Match score: ${Number(match.score) || 0}%</strong><p>Why this may be a match</p><div class="match-reasons">${(match.matchedFields || []).map((field) => `<span>✓ ${escapeHtml(matchReason(field))}</span>`).join('') || '<span>No comparable fields were recorded.</span>'}</div><p class="match-status">Status: ${escapeHtml(status.replace('_', ' '))}</p></div><div class="match-details-grid">${reportSection('Your Lost Item', match.lostReport)}${reportSection('Matching Found Item', match.foundReport)}</div><div class="match-actions">${actions}</div>`);
+    const reportSection = (title, report) => `<section class="match-report"><h2>${title}</h2><span class="badge ${report.type}">${report.type === 'lost' ? 'Lost report' : 'Found report'}</span><div class="detail-image-frame">${reportImageFor(report, 'detail-image')}</div><h3>${escapeHtml(report.itemName || 'Item')}</h3><p><b>Category:</b> ${escapeHtml(report.category || 'Not provided')}</p><p><b>Location:</b> ${escapeHtml(report.location || 'Not provided')}</p><p><b>Date:</b> ${escapeHtml(reportDate(report))}</p></section>`;
+    root.innerHTML = shell(`<button class="back" id="matchesBack" type="button">← Back to My Reports</button><h1 class="page-title">${matchLabel(match)}</h1><p class="subtitle">Please verify these details. This is a suggested connection, not confirmation that the item has been recovered.</p><div class="match-score-panel"><strong>Match score: ${Number(match.score) || 0}%</strong><p>Why this may be a match</p><div class="match-reasons">${(match.matchedFields || []).map((field) => `<span>✓ ${escapeHtml(matchReason(field))}</span>`).join('') || '<span>No comparable fields were recorded.</span>'}</div><p class="match-status">Status: ${escapeHtml(status.replace('_', ' '))}</p></div><div class="match-details-grid">${reportSection('Your Lost Item', match.lostReport)}${reportSection('Matching Found Item', match.foundReport)}</div><div class="match-actions">${actions}</div>`);
+    bindReportImageFallback(root);
     $('#matchesBack').onclick = () => render('my-reports');
     document.querySelectorAll('.match-action').forEach((button) => button.onclick = async () => { button.disabled = true; try { await window.NexusFind.updateMatchStatus(id, button.dataset.action); toast(button.dataset.action === 'claim' ? 'Claim request sent. The other reporter has been notified.' : 'Match status updated.'); await showMatchDetails(id); } catch (error) { console.error('Unable to update match:', error); toast(error.message || 'Unable to update match. Please try again.'); button.disabled = false; } });
   } catch (error) { console.error('Unable to load match:', error); toast(error.message || 'Unable to load this potential match.'); }
@@ -116,18 +194,24 @@ let lostDraft = {};
 function renderLostStep(step) {
   const form = $('#lostForm');
   const fields = step === 1
-    ? `<div class="form-grid"><div class="field wide"><label>Item Name</label><input class="input" id="lostItemName" value="${escapeHtml(lostDraft.itemName || '')}" placeholder="e.g. Earphones, Keys, Wallet..." required></div><div class="field wide"><label>Category</label><select id="lostCategory" required><option value="">Select category</option><option>Electronics</option><option>Keys</option><option>Bags & Backpacks</option><option>ID Cards</option><option>Personal Items</option></select></div><div class="field wide"><label>Description</label><textarea id="lostDescription" placeholder="Describe distinguishing features..." required>${escapeHtml(lostDraft.description || '')}</textarea></div><div class="field wide"><label>Identifying details</label><input class="input" id="lostIdentifying" value="${escapeHtml(lostDraft.identifyingDetails || '')}" placeholder="Color, brand, sticker, scratches..."></div><div class="field wide"><label>Item image (optional)</label><input class="input" id="lostImage" type="file" accept="image/png,image/jpeg"><small class="subtitle">PNG or JPG, up to 5MB. ${lostDraft.imageFile ? 'An image is selected.' : ''}</small></div><div class="field wide"><label>Reward (Optional)</label><input class="input" id="lostReward" value="${escapeHtml(lostDraft.reward || '')}" placeholder="e.g. ₹500"></div></div>`
+    ? `<div class="form-grid"><div class="field wide"><label>Item Name</label><input class="input" id="lostItemName" value="${escapeHtml(lostDraft.itemName || '')}" placeholder="e.g. Earphones, Keys, Wallet..." required></div><div class="field wide"><label>Category</label><select id="lostCategory" required><option value="">Select category</option><option>Electronics</option><option>Keys</option><option>Bags & Backpacks</option><option>ID Cards</option><option>Personal Items</option></select></div><div class="field wide"><label>Description</label><textarea id="lostDescription" placeholder="Describe distinguishing features..." required>${escapeHtml(lostDraft.description || '')}</textarea></div><div class="field wide"><label>Identifying details</label><input class="input" id="lostIdentifying" value="${escapeHtml(lostDraft.identifyingDetails || '')}" placeholder="Color, brand, sticker, scratches..."></div><div class="field wide"><label>Item image (optional)</label><input class="input" id="lostImage" type="file" accept="image/png,image/jpeg"><div class="image-preview" id="lostImagePreview"></div><small class="subtitle">PNG or JPG, up to 5MB.</small></div><div class="field wide"><label>Reward (Optional)</label><input class="input" id="lostReward" value="${escapeHtml(lostDraft.reward || '')}" placeholder="e.g. ₹500"></div></div>`
     : step === 2
       ? `<div class="form-grid"><div class="field wide"><label>Last Seen Location</label><select id="lostLocation" required><option value="">Select location</option><option>Library</option><option>Canteen</option><option>Classroom</option><option>Parking Area</option><option>Computer Lab</option></select></div><div class="field wide"><label>Specific Landmark / Area</label><input class="input" id="lostLandmark" value="${escapeHtml(lostDraft.landmark || '')}" placeholder="e.g. Near window seat, 2nd floor..."></div><div class="field"><label>Date Lost</label><input type="date" class="input" id="lostDate" value="${escapeHtml(lostDraft.dateLost || '')}" required></div><div class="field"><label>Approximate time</label><input type="time" class="input" id="lostTime" value="${escapeHtml(lostDraft.approximateTime || '')}"></div><div class="hint">💡 &nbsp; The more precise your location, the higher the chance of a match.</div></div>`
       : `<div class="form-grid"><div class="summary"><strong>REPORT SUMMARY</strong>Item: ${escapeHtml(lostDraft.itemName || '—')}<br>Category: ${escapeHtml(lostDraft.category || '—')}<br>Location: ${escapeHtml(lostDraft.location || '—')}<br>Date: ${escapeHtml(lostDraft.dateLost || '—')}</div><p class="subtitle wide">Your account will be used as the report owner. Contact details remain private.</p></div>`;
   form.innerHTML = `${fields}<p class="submit-error" id="lostSubmitError" role="alert" aria-live="polite"></p><div class="form-actions">${step > 1 ? '<button type="button" class="back" id="prev">← Back</button>' : '<span></span>'}<button class="button" type="submit">${step === 3 ? 'Submit Report' : 'Continue →'}</button></div>`;
-  if (step === 1) $('#lostCategory').value = lostDraft.category || '';
+  if (step === 1) {
+    $('#lostCategory').value = lostDraft.category || '';
+    $('#lostCategory').closest('.field').insertAdjacentHTML('afterend', `<div class="field"><label>Color (optional)</label><input class="input" id="lostColor" value="${escapeHtml(lostDraft.color || '')}" placeholder="e.g. Black"></div>`);
+    $('#lostIdentifying').placeholder = 'Private verification details';
+  }
   if (step === 2) $('#lostLocation').value = lostDraft.location || '';
+  if (step === 1) bindImagePreview($('#lostImage'), $('#lostImagePreview'), () => lostDraft.imageFile || null, (file) => { lostDraft.imageFile = file; });
   [...document.querySelectorAll('.progress-step')].forEach((el, i) => { el.classList.toggle('active', i === step - 1); el.classList.toggle('done', i < step - 1); el.querySelector('.progress-dot').textContent = i < step - 1 ? '✓' : i + 1; });
   [...document.querySelectorAll('.progress-line')].forEach((el, i) => el.classList.toggle('done', i < step - 1));
   form.onsubmit = async (event) => {
     event.preventDefault();
     if (step === 1) Object.assign(lostDraft, { itemName: $('#lostItemName').value, category: $('#lostCategory').value, description: $('#lostDescription').value, reward: $('#lostReward').value });
+    if (step === 1) lostDraft.color = $('#lostColor').value;
     if (step === 1) { const file = $('#lostImage').files[0]; if (file) lostDraft.imageFile = file; Object.assign(lostDraft, { identifyingDetails: $('#lostIdentifying').value }); }
     if (step === 2) Object.assign(lostDraft, { location: $('#lostLocation').value, landmark: $('#lostLandmark').value, approximateTime: $('#lostTime').value, dateLost: $('#lostDate').value });
     if (!form.checkValidity()) { form.reportValidity(); return; }
@@ -139,7 +223,7 @@ function renderLostStep(step) {
       console.info('[REPORT] Submit started');
       const result = await window.NexusFind.createItemReport({ ...lostDraft, type: 'lost' });
       console.info('[REPORT] Submission completed:', result.id);
-      toast('Your lost item report was submitted!'); lostDraft = {}; render('my-reports');
+      toast('Your lost item report was submitted!'); releaseImagePreview(lostDraft.imageFile); lostDraft = {}; render('my-reports');
     } catch (error) {
       console.error('[REPORT] Lost report submission failed:', error);
       if (errorElement) errorElement.textContent = reportSubmissionError(error);
@@ -153,8 +237,12 @@ function renderLostStep(step) {
 }
 
 function found() {
-  root.innerHTML = shell(`${reportHeader('found')}<form class="form-card" id="foundForm"><div class="form-grid"><div class="field"><label>Item Name</label><input class="input" id="foundItemName" placeholder="e.g. Silver water bottle" required></div><div class="field"><label>Category</label><select id="foundCategory" required><option value="">Select category</option><option>Electronics</option><option>Keys</option><option>Bags & Backpacks</option><option>ID Cards</option><option>Personal Items</option></select></div><div class="field wide"><label>Description</label><textarea id="foundDescription" placeholder="Describe distinguishing features..." required></textarea></div><div class="field wide"><label>Identifying details</label><input class="input" id="foundIdentifying" placeholder="Color, brand, sticker, scratches..."></div><div class="field wide"><label>Item image (optional)</label><input class="input" id="foundImage" type="file" accept="image/png,image/jpeg"></div><div class="field"><label>Location Found</label><input class="input" id="foundLocation" placeholder="e.g. Cafeteria" required></div><div class="field"><label>Date Found</label><input type="date" class="input" id="foundDate" required></div><div class="field"><label>Approximate time</label><input type="time" class="input" id="foundTime"></div><div class="field wide"><label>Current Storage Location</label><input class="input" id="foundStorage" placeholder="e.g. Security desk, Block A"></div></div><p class="submit-error" id="foundSubmitError" role="alert" aria-live="polite"></p><div class="form-actions"><span></span><button class="button" type="submit">Submit found item</button></div></form>`, 'form-page');
+  let foundImageFile = null;
+  root.innerHTML = shell(`${reportHeader('found')}<form class="form-card" id="foundForm"><div class="form-grid"><div class="field"><label>Item Name</label><input class="input" id="foundItemName" placeholder="e.g. Silver water bottle" required></div><div class="field"><label>Category</label><select id="foundCategory" required><option value="">Select category</option><option>Electronics</option><option>Keys</option><option>Bags & Backpacks</option><option>ID Cards</option><option>Personal Items</option></select></div><div class="field wide"><label>Description</label><textarea id="foundDescription" placeholder="Describe distinguishing features..." required></textarea></div><div class="field wide"><label>Identifying details</label><input class="input" id="foundIdentifying" placeholder="Color, brand, sticker, scratches..."></div><div class="field wide"><label>Item image (optional)</label><input class="input" id="foundImage" type="file" accept="image/png,image/jpeg"><div class="image-preview" id="foundImagePreview"></div><small class="subtitle">PNG or JPG, up to 5MB.</small></div><div class="field"><label>Location Found</label><input class="input" id="foundLocation" placeholder="e.g. Cafeteria" required></div><div class="field"><label>Date Found</label><input type="date" class="input" id="foundDate" required></div><div class="field"><label>Approximate time</label><input type="time" class="input" id="foundTime"></div><div class="field wide"><label>Current Storage Location</label><input class="input" id="foundStorage" placeholder="e.g. Security desk, Block A"></div></div><p class="submit-error" id="foundSubmitError" role="alert" aria-live="polite"></p><div class="form-actions"><span></span><button class="button" type="submit">Submit found item</button></div></form>`, 'form-page');
   const form = $('#foundForm');
+  $('#foundCategory').closest('.field').insertAdjacentHTML('afterend', '<div class="field"><label>Color (optional)</label><input class="input" id="foundColor" placeholder="e.g. Black"></div>');
+  $('#foundIdentifying').placeholder = 'Private verification details';
+  bindImagePreview($('#foundImage'), $('#foundImagePreview'), () => foundImageFile, (file) => { foundImageFile = file; });
   form.onsubmit = async (event) => {
     event.preventDefault();
     if (!form.checkValidity()) { form.reportValidity(); return; }
@@ -164,9 +252,11 @@ function found() {
     submitButton.textContent = 'Submitting...';
     try {
       console.info('[REPORT] Submit started');
-      const result = await window.NexusFind.createItemReport({ type: 'found', itemName: $('#foundItemName').value, category: $('#foundCategory').value, description: $('#foundDescription').value, identifyingDetails: $('#foundIdentifying').value, imageFile: $('#foundImage').files[0] || null, location: $('#foundLocation').value, dateFound: $('#foundDate').value, approximateTime: $('#foundTime').value, storageLocation: $('#foundStorage').value });
+      const result = await window.NexusFind.createItemReport({ type: 'found', itemName: $('#foundItemName').value, category: $('#foundCategory').value, color: $('#foundColor').value, description: $('#foundDescription').value, identifyingDetails: $('#foundIdentifying').value, imageFile: foundImageFile, location: $('#foundLocation').value, dateFound: $('#foundDate').value, approximateTime: $('#foundTime').value, storageLocation: $('#foundStorage').value });
       console.info('[REPORT] Submission completed:', result.id);
       toast('Thank you for reporting this found item!');
+      releaseImagePreview(foundImageFile);
+      foundImageFile = null;
       render('my-reports');
     } catch (error) {
       console.error('[REPORT] Found report submission failed:', error);
@@ -180,6 +270,7 @@ function found() {
 }
 
 function reportSubmissionError(error) {
+  if (/image upload failed/i.test(error?.message || '')) return 'Image upload failed. Please try again.';
   if (error?.code === 'permission-denied' || error?.code === 'firestore/permission-denied') return 'Unable to submit your report. Your account may not have permission to create reports.';
   if (error?.code === 'unavailable' || error?.code === 'firestore/unavailable' || error?.code === 'auth/network-request-failed') return 'Unable to reach Firebase. Check your connection and try again.';
   if (/sign in|authenticated/i.test(error?.message || '')) return 'Please log in before submitting a report.';
