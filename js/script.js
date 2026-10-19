@@ -13,6 +13,10 @@ let persistedReports = [];
 let notificationsData = [];
 let matchesData = [];
 let claimsData = [];
+let matchesLoaded = false;
+let claimsLoaded = false;
+let matchesLoadError = false;
+let claimsLoadError = false;
 const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]);
 const reportDate = (report) => report.dateFound || report.dateLost || 'Date not provided';
 const localItemImages = [
@@ -158,13 +162,31 @@ function showClaimForm(itemId) {
   $('#claimForm').onsubmit = async (event) => { event.preventDefault(); const form = event.currentTarget, button = form.querySelector('button[type=submit]'), error = $('#claimError'); button.disabled = true; button.textContent = 'Submitting…'; error.textContent = ''; try { await window.NexusFind.submitOwnershipClaim(itemId, form.reason.value, form.evidence.value); toast('Your claim was submitted for review.'); render('claims'); } catch (err) { error.textContent = err.message || 'Unable to submit this claim.'; button.disabled = false; button.textContent = 'Submit Claim'; } };
 }
 function claimStatus(status) { return `<span class="claim-status ${String(status).toLowerCase()}">${escapeHtml(status)}</span>`; }
+function matchClaimCard(match) {
+  const found = persistedReports.find((report) => report.id === match.foundReportId);
+  const lost = persistedReports.find((report) => report.id === match.lostReportId);
+  const requested = match.claimRequestedAt || match.updatedAt || match.createdAt;
+  const status = match.status === 'claim_requested' ? 'Pending · waiting for reporter'
+    : match.status === 'confirmed' ? 'Confirmed by reporter'
+    : match.status === 'rejected' ? 'Rejected by reporter' : 'Recovered';
+  const badge = match.status === 'rejected' ? 'rejected' : match.status === 'resolved' ? 'approved' : 'pending';
+  return `<article class="card my-claim-card match-claim-card"><div class="my-claim-photo">${found ? reportImageFor(found) : '<span class="image-placeholder">Found report unavailable</span>'}</div><div class="my-claim-copy"><div class="claim-row"><div><h2>Match request: ${escapeHtml(found?.itemName || 'Found item')}</h2><p>Match ID: ${escapeHtml(match.id)}</p></div><span class="claim-status ${badge}">${escapeHtml(status)}</span></div><p>Requested ${escapeHtml(relativeTime(requested))}${requested?.toDate ? ` · ${escapeHtml(requested.toDate().toLocaleDateString())}` : ''}</p><p>Related lost item: ${escapeHtml(lost?.itemName || match.lostReportId)}</p><p>This request is waiting for the other reporter's response. It is separate from an Admin Verification claim.</p><button class="small-button view-match" data-match-id="${escapeHtml(match.id)}" type="button">View Match</button></div></article>`;
+}
 function claimsPage() {
-  root.innerHTML = shell(`<h1 class="page-title">My Claims</h1><p class="subtitle">Your ownership claims, decisions, and pickup coordination</p><div class="claim-list">${claimsData.map((claim) => {
+  const currentUid = window.NexusFind.currentUser?.()?.uid;
+  const matchRequests = matchesData.filter((match) => match.claimedBy === currentUid && ['claim_requested', 'confirmed', 'rejected', 'resolved'].includes(match.status));
+  const loading = !claimsLoaded || !matchesLoaded;
+  const adminClaims = claimsData.map((claim) => {
     const item = claim.item || {};
     const pickup = claim.pickupStatus || 'Awaiting pickup coordination';
     return `<article class="card my-claim-card"><div class="my-claim-photo">${item.imageUrl ? reportImageFor(item) : '<span class="image-placeholder">No item photo</span>'}</div><div class="my-claim-copy"><div class="claim-row"><div><h2>${escapeHtml(claim.itemName || item.itemName || 'Found item')}</h2><p>Item ID: ${escapeHtml(claim.itemId)}</p></div>${claimStatus(claim.status)}</div><p>Submitted ${escapeHtml(relativeTime(claim.createdAt))}${claim.createdAt?.toDate ? ` · ${escapeHtml(claim.createdAt.toDate().toLocaleDateString())}` : ''}</p><p>${escapeHtml(item.description || 'Item details are unavailable.')}</p>${claim.decision ? `<div class="claim-decision-copy"><b>Admin decision:</b> ${escapeHtml(claim.decision)}${claim.decidedAt?.toDate ? ` · ${escapeHtml(claim.decidedAt.toDate().toLocaleString())}` : ''}${claim.decisionReason ? `<br><b>Reason:</b> ${escapeHtml(claim.decisionReason)}` : ''}</div>` : ''}${claim.status === 'Approved' ? `<div class="pickup-panel"><b>Pickup:</b> ${escapeHtml(pickup)}${claim.pickupDetails ? `<p>${escapeHtml(claim.pickupDetails)}</p>` : '<p>The admin will provide pickup details here.</p>'}${claim.pickupStatus === 'Coordinated' ? `<button class="small-button confirm-received" data-claim-id="${escapeHtml(claim.id)}" type="button">Confirm I received the item</button>` : ''}${claim.pickupStatus === 'Recovered' ? '<span class="claim-status approved">Recovered</span>' : ''}</div>` : ''}</div></article>`;
-  }).join('') || '<p class="subtitle claim-empty">You have not submitted any claims yet. When you claim a found item, its live status will appear here.</p>'}</div>`);
+  });
+  const empty = loading ? '<p class="subtitle claim-empty">Loading your claims…</p>' : '<p class="subtitle claim-empty">You have not submitted any ownership claims or match requests yet.</p>';
+  const claimEmpty = claimsLoadError ? '<p class="subtitle claim-empty">Your ownership claims could not be loaded. Refresh to try again.</p>' : claimsLoaded ? '<p class="subtitle claim-empty">No admin ownership claims submitted.</p>' : empty;
+  const matchEmpty = matchesLoadError ? '<p class="subtitle claim-empty">Your match requests could not be loaded. Refresh to try again.</p>' : matchesLoaded ? '<p class="subtitle claim-empty">No match confirmation requests.</p>' : empty;
+  root.innerHTML = shell(`<h1 class="page-title">My Claims</h1><p class="subtitle">Claims and match requests for your account. These use separate workflows and update from Firebase.</p><div class="section-heading matches-heading"><div><h2>Admin ownership claims</h2><p>Pending, approved, or rejected through Admin Verification.</p></div></div><div class="claim-list">${adminClaims.join('') || claimEmpty}</div><div class="section-heading matches-heading"><div><h2>Match confirmation requests</h2><p>“This is My Item” requests awaiting another reporter’s response.</p></div></div><div class="claim-list">${matchRequests.map(matchClaimCard).join('') || matchEmpty}</div>`);
   bindReportImageFallback(root);
+  document.querySelectorAll('.view-match').forEach((button) => button.onclick = () => showMatchDetails(button.dataset.matchId));
   document.querySelectorAll('.confirm-received').forEach((button) => button.onclick = async () => {
     if (!window.confirm('Confirm that the item has been returned to you? This will mark the item Recovered.')) return;
     button.disabled = true;
@@ -197,13 +219,16 @@ async function showMatchDetails(id) {
     const ownClaim = match.claimedBy === current?.uid;
     const actions = !isParticipant ? '' : status === 'potential'
       ? sameReporter ? '<p class="subtitle">Both reports are from your account. Review the details to verify this suggestion.</p><button class="small-button match-action" data-action="reject" type="button">Not a Match</button>' : '<button class="button match-action" data-action="claim" type="button">This is My Item</button><button class="small-button match-action" data-action="reject" type="button">Not a Match</button>'
-      : status === 'claim_requested' ? (ownClaim ? '<p class="subtitle">Claim request sent. Waiting for the other reporter.</p>' : '<button class="button match-action" data-action="confirm" type="button">Confirm Match</button><button class="small-button match-action" data-action="reject" type="button">Not a Match</button>')
+      : status === 'claim_requested' ? (ownClaim ? '<p class="subtitle">Match request sent. Waiting for the other reporter. Admin ownership claims appear in My Claims under their separate section.</p>' : '<button class="button match-action" data-action="confirm" type="button">Confirm Match</button><button class="small-button match-action" data-action="reject" type="button">Not a Match</button>')
       : status === 'confirmed' ? '<button class="button match-action" data-action="resolve" type="button">Mark as Recovered</button>' : '';
+    const adminClaimAction = match.lostUserId === current?.uid && match.foundUserId !== current?.uid && match.foundReport?.type === 'found'
+      ? `<p class="subtitle">Need an admin to verify ownership? Submit a separate ownership claim with private identifying details. It can be reviewed while the match request is pending.</p><button class="small-button submit-admin-claim" data-item-id="${escapeHtml(match.foundReportId)}" type="button">Submit Admin Ownership Claim</button>` : '';
     const reportSection = (title, report) => `<section class="match-report"><h2>${title}</h2><span class="badge ${report.type}">${report.type === 'lost' ? 'Lost report' : 'Found report'}</span><div class="detail-image-frame">${reportImageFor(report, 'detail-image')}</div><h3>${escapeHtml(report.itemName || 'Item')}</h3><p><b>Category:</b> ${escapeHtml(report.category || 'Not provided')}</p><p><b>Location:</b> ${escapeHtml(report.location || 'Not provided')}</p><p><b>Date:</b> ${escapeHtml(reportDate(report))}</p></section>`;
-    root.innerHTML = shell(`<button class="back" id="matchesBack" type="button">← Back to My Reports</button><h1 class="page-title">${matchLabel(match)}</h1><p class="subtitle">Please verify these details. This is a suggested connection, not confirmation that the item has been recovered.</p><div class="match-score-panel"><strong>Match score: ${Number(match.score) || 0}%</strong><p>Why this may be a match</p><div class="match-reasons">${(match.matchedFields || []).map((field) => `<span>✓ ${escapeHtml(matchReason(field))}</span>`).join('') || '<span>No comparable fields were recorded.</span>'}</div><p class="match-status">Status: ${escapeHtml(status.replace('_', ' '))}</p></div><div class="match-details-grid">${reportSection('Your Lost Item', match.lostReport)}${reportSection('Matching Found Item', match.foundReport)}</div><div class="match-actions">${actions}</div>`);
+    root.innerHTML = shell(`<button class="back" id="matchesBack" type="button">← Back to My Reports</button><h1 class="page-title">${matchLabel(match)}</h1><p class="subtitle">Please verify these details. This is a suggested connection, not confirmation that the item has been recovered.</p><div class="match-score-panel"><strong>Match score: ${Number(match.score) || 0}%</strong><p>Why this may be a match</p><div class="match-reasons">${(match.matchedFields || []).map((field) => `<span>✓ ${escapeHtml(matchReason(field))}</span>`).join('') || '<span>No comparable fields were recorded.</span>'}</div><p class="match-status">Status: ${escapeHtml(status.replace('_', ' '))}</p></div><div class="match-details-grid">${reportSection('Your Lost Item', match.lostReport)}${reportSection('Matching Found Item', match.foundReport)}</div><div class="match-actions">${actions}${adminClaimAction}</div>`);
     bindReportImageFallback(root);
     $('#matchesBack').onclick = () => render('my-reports');
-    document.querySelectorAll('.match-action').forEach((button) => button.onclick = async () => { button.disabled = true; try { await window.NexusFind.updateMatchStatus(id, button.dataset.action); toast(button.dataset.action === 'claim' ? 'Claim request sent. The other reporter has been notified.' : 'Match status updated.'); await showMatchDetails(id); } catch (error) { console.error('Unable to update match:', error); toast(error.message || 'Unable to update match. Please try again.'); button.disabled = false; } });
+    document.querySelectorAll('.submit-admin-claim').forEach((button) => { button.onclick = () => showClaimForm(button.dataset.itemId); });
+    document.querySelectorAll('.match-action').forEach((button) => button.onclick = async () => { button.disabled = true; try { await window.NexusFind.updateMatchStatus(id, button.dataset.action); toast(button.dataset.action === 'claim' ? 'Match request sent to the other reporter.' : 'Match status updated.'); await showMatchDetails(id); } catch (error) { console.error('Unable to update match:', error); toast(error.message || 'Unable to update match. Please try again.'); button.disabled = false; } });
   } catch (error) { console.error('Unable to load match:', error); toast(error.message || 'Unable to load this potential match.'); }
 }
 function myReports() {
@@ -328,13 +353,19 @@ window.NexusFind.watchNotifications((notifications) => {
   console.error('Unable to load notifications:', error);
   toast('Unable to load notifications. Please refresh and try again.');
 });
-window.NexusFind.watchMatchesForUser((matches) => {
+window.NexusFind.watchMatchesForUser((matches, loading = false) => {
   matchesData = matches;
-  if (['my-reports', 'matches'].includes(document.querySelector('.nav-link.active')?.dataset.page)) render('my-reports');
+  matchesLoaded = !loading;
+  if (loading) matchesLoadError = false;
+  const page = document.querySelector('.nav-link.active')?.dataset.page;
+  if (['my-reports', 'matches'].includes(page)) render('my-reports');
+  if (page === 'claims') render('claims');
 }, (error) => {
+  matchesLoadError = true;
   console.error('Unable to load potential matches:', error);
+  if (document.querySelector('.nav-link.active')?.dataset.page === 'claims') render('claims');
   toast('Potential matches could not be updated right now.');
 });
 document.querySelector('.sidebar-bottom a')?.addEventListener('click', (event) => { event.preventDefault(); render('my-reports'); });
-window.NexusFind.watchClaimsForUser((claims) => { claimsData = claims; const page = document.querySelector('.nav-link.active')?.dataset.page; if (['claims', 'my-reports', 'browse'].includes(page)) render(page); }, (error) => { console.error('Unable to load ownership claims:', error); toast('Claims could not be loaded. Please refresh and try again.'); });
+window.NexusFind.watchClaimsForUser((claims, loading = false) => { claimsData = claims; claimsLoaded = !loading; if (loading) claimsLoadError = false; const page = document.querySelector('.nav-link.active')?.dataset.page; if (['claims', 'my-reports', 'browse'].includes(page)) render(page); }, (error) => { claimsLoadError = true; console.error('Unable to load ownership claims:', error); const page = document.querySelector('.nav-link.active')?.dataset.page; if (page === 'claims') render('claims'); toast('Claims could not be loaded. Please refresh and try again.'); });
 document.querySelectorAll('.nav-link').forEach(b=>b.onclick=()=>render(b.dataset.page));function applyLogoTheme(){const light=document.body.dataset.theme==='light';const logo=light?'images/logo_nexusfind_light.png':'images/logo_nexusfind.png';document.querySelectorAll('.brand-logo,.mobile-logo,.auth-logo').forEach(img=>{img.src=logo})}function toggleTheme(){const light=document.body.dataset.theme==='light';document.body.dataset.theme=light?'':'light';localStorage.nexusTheme=light?'dark':'light';document.querySelectorAll('#themeToggle span').forEach(s=>s.textContent=light?'Light mode':'Dark mode');applyLogoTheme()}$('#themeToggle').onclick=toggleTheme;$('#mobileTheme').onclick=toggleTheme;$('#mobileMenu').onclick=()=>$('#sidebar').classList.toggle('open');if(localStorage.nexusTheme==='light')document.body.dataset.theme='light';applyLogoTheme();home();bindGo();

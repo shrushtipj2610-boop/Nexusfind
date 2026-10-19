@@ -128,16 +128,20 @@ export function watchMatchesForUser(callback, onError) {
   let stops = [];
   const stopAuth = onAuthStateChanged(auth, (user) => {
     stops.forEach((stop) => stop()); stops = [];
-    if (!user) { callback([]); return; }
+    callback([], true);
+    if (!user) { callback([], false); return; }
     const collected = new Map();
+    const initialized = new Set();
     const publish = () => callback([...collected.values()].sort((a, b) =>
       (Number(b.score) || 0) - (Number(a.score) || 0)
-      || (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)));
+      || (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)), initialized.size < 2);
     for (const field of ['lostUserId', 'foundUserId']) {
       stops.push(onSnapshot(query(collection(db, 'matches'), where(field, '==', user.uid)), (snapshot) => {
+        if (auth.currentUser?.uid !== user.uid) return;
         snapshot.docChanges().forEach((change) => { if (change.type === 'removed') collected.delete(change.doc.id); else collected.set(change.doc.id, { id: change.doc.id, ...change.doc.data() }); });
+        initialized.add(field);
         publish();
-      }, onError));
+      }, (error) => { initialized.add(field); publish(); onError?.(error); }));
     }
   }, onError);
   return () => { stops.forEach((stop) => stop()); stopAuth(); };
@@ -165,11 +169,11 @@ export async function updateMatchStatus(id, action) {
       : action === 'reject' && ['potential', 'claim_requested'].includes(match.status) ? 'rejected'
       : action === 'resolve' && match.status === 'confirmed' ? 'resolved' : null;
     if (!next) throw new Error('This action is not available for the current match status.');
-    transaction.update(reference, { status: next, ...(action === 'claim' ? { claimedBy: uid } : {}), updatedAt: serverTimestamp() });
+    transaction.update(reference, { status: next, ...(action === 'claim' ? { claimedBy: uid, claimRequestedAt: serverTimestamp() } : {}), updatedAt: serverTimestamp() });
     if (action !== 'reject') {
       const other = uid === match.lostUserId ? match.foundUserId : match.lostUserId;
       const notificationRef = doc(collection(db, 'notifications'));
-      transaction.set(notificationRef, { type: 'match_update', title: next === 'claim_requested' ? 'Claim request received' : `Match ${next.replace('_', ' ')}`, message: next === 'claim_requested' ? 'A user believes this item may belong to them. Review the potential match.' : `The potential match status is now ${next.replace('_', ' ')}.`, userId: other, matchId: id, reportId: uid === match.lostUserId ? match.lostReportId : match.foundReportId, read: false, createdAt: serverTimestamp() });
+      transaction.set(notificationRef, { type: 'match_update', title: next === 'claim_requested' ? 'Match confirmation requested' : `Match ${next.replace('_', ' ')}`, message: next === 'claim_requested' ? 'A reporter believes the matched item may belong to them and is waiting for your response.' : `The potential match status is now ${next.replace('_', ' ')}.`, userId: other, matchId: id, reportId: uid === match.lostUserId ? match.lostReportId : match.foundReportId, read: false, createdAt: serverTimestamp() });
     }
     if (next === 'resolved') {
       const ownReportId = uid === match.lostUserId ? match.lostReportId : match.foundReportId;
@@ -235,14 +239,26 @@ export async function markNotificationRead(id) {
 }
 
 export function watchClaimsForUser(callback, onError) {
-  if (!auth?.currentUser) { callback([]); return () => {}; }
-  return onSnapshot(query(collection(db, 'claims'), where('claimantId', '==', auth.currentUser.uid)), (snapshot) => {
-    void Promise.all(snapshot.docs.map(async (entry) => {
-      const claim = { id: entry.id, ...entry.data() };
-      claim.item = await getItemReport(claim.itemId).catch(() => null);
-      return claim;
-    })).then((claims) => callback(claims.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)))).catch(onError);
+  if (!auth || !db) { callback([], false); onError?.(new Error('Firebase is not configured.')); return () => {}; }
+  let stopClaims = () => {}, generation = 0;
+  const stopAuth = onAuthStateChanged(auth, (user) => {
+    generation += 1;
+    const currentGeneration = generation;
+    stopClaims();
+    stopClaims = () => {};
+    callback([], true);
+    if (!user) { callback([], false); return; }
+    stopClaims = onSnapshot(query(collection(db, 'claims'), where('claimantId', '==', user.uid)), (snapshot) => {
+      void Promise.all(snapshot.docs.map(async (entry) => {
+        const claim = { id: entry.id, ...entry.data() };
+        claim.item = await getItemReport(claim.itemId).catch(() => null);
+        return claim;
+      })).then((claims) => {
+        if (currentGeneration === generation) callback(claims.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)), false);
+      }).catch(onError);
+    }, onError);
   }, onError);
+  return () => { generation += 1; stopClaims(); stopAuth(); };
 }
 
 export async function submitOwnershipClaim(itemId, reason, evidence) {
@@ -252,7 +268,7 @@ export async function submitOwnershipClaim(itemId, reason, evidence) {
   const itemRef = doc(db, 'items', itemId);
   const claimRef = doc(collection(db, 'claims'));
   const activeRef = doc(db, 'activeClaims', `${itemId}_${user.uid}`);
-  const reviewNotice = doc(collection(db, 'notifications'));
+  const reviewNotice = doc(db, 'notifications', `claim_submitted_${claimRef.id}`);
   await runTransaction(db, async (tx) => {
     const [itemSnap, activeSnap] = await Promise.all([tx.get(itemRef), tx.get(activeRef)]);
     if (!itemSnap.exists() || itemSnap.data().type !== 'found') throw new Error('This found item is unavailable for claims.');
@@ -274,7 +290,7 @@ export async function decideOwnershipClaim(claimId, decision, rejectionReason = 
   const admin = auth?.currentUser;
   if (!admin) throw new Error('Sign in with an administrator account.');
   const claimRef = doc(db, 'claims', claimId);
-  const decisionNotice = doc(collection(db, 'notifications'));
+  const decisionNotice = doc(db, 'notifications', `claim_decision_${claimId}`);
   await runTransaction(db, async (tx) => {
     const claimSnap = await tx.get(claimRef);
     if (!claimSnap.exists()) throw new Error('This claim no longer exists.');
@@ -309,7 +325,7 @@ export async function coordinateClaimPickup(claimId, pickupDetails) {
 export async function confirmClaimReceived(claimId) {
   const claimant = auth?.currentUser;
   if (!claimant) throw new Error('Sign in before confirming pickup.');
-  const claimRef = doc(db, 'claims', claimId), recoveredNotice = doc(collection(db, 'notifications')), adminNotice = doc(collection(db, 'notifications'));
+  const claimRef = doc(db, 'claims', claimId), recoveredNotice = doc(db, 'notifications', `recovery_claimant_${claimId}`), adminNotice = doc(db, 'notifications', `recovery_admin_${claimId}`);
   await runTransaction(db, async (tx) => {
     const claimSnap = await tx.get(claimRef);
     if (!claimSnap.exists()) throw new Error('This claim no longer exists.');
