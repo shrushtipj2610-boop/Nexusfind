@@ -34,6 +34,7 @@
     .auth-form .button { margin-top: 5px; width: 100%; }
     .auth-error { min-height: 20px; color: #ff7b85; font-size: 14px; margin: 0; }
     .auth-footnote { text-align: center; color: var(--muted); font-size: 13px; margin: 19px 0 0 !important; }
+    .auth-switch { border: 0; padding: 0; background: none; color: #aeb7ff; font: inherit; font-weight: 750; cursor: pointer; }
     .auth-role-label { display: block; color: var(--muted); font-size: 14px; font-weight: 700; margin: 0 0 9px; }
     .auth-roles { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 21px; }
     .auth-role { height: 52px; border: 1px solid var(--line); border-radius: 14px; background: transparent; color: var(--muted); font: inherit; font-weight: 700; cursor: pointer; }
@@ -55,8 +56,10 @@
         <button class="nav-link" data-page="lost"><i><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5v6l10 10 8-8L11 3H5a2 2 0 0 0-2 2Z"/><circle cx="7.5" cy="7.5" r=".75"/><path d="M14.5 11.5a1.5 1.5 0 1 1 2.2 1.3c-.7.4-1.2.8-1.2 1.7M15.5 17h.01"/></svg></i>Report Lost</button>
         <button class="nav-link" data-page="found"><i><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h16v12H4zM4 8l3-4h10l3 4M12 4v4"/><path d="m8.5 14 2.2 2.2 4.8-4.8"/></svg></i>Report Found</button>
         <button class="nav-link notify-link" data-page="notifications"><i>🔔<b>3</b></i>Notifications <em>3</em></button>
+        <button class="nav-link" data-page="claims"><i>✓</i>My Claims</button>
+        <button class="nav-link" data-page="admin" id="adminNav" hidden><i>✓</i>Admin Verification</button>
       </nav>
-      <div class="sidebar-bottom"><a href="#">My Reports</a><a href="#">About</a><button class="theme-button" id="themeToggle">☀ <span>Light mode</span></button><button class="logout-button" id="logoutButton" type="button">Log out</button></div>
+      <div class="sidebar-bottom"><a href="#" id="myReportsLink">My Reports</a><a href="#">About</a><button class="theme-button" id="themeToggle">☀ <span>Light mode</span></button><button class="logout-button" id="logoutButton" type="button">Log out</button></div>
     </aside>
     <main class="content">
       <header class="mobile-bar"><button id="mobileMenu" aria-label="Open menu">☰</button><div class="mobile-brand"><img class="mobile-logo" src="images/logo_nexusfind.png" alt="NexusFind logo" /><span class="mobile-wordmark">Nexus<span>Find</span></span></div><button id="mobileTheme" aria-label="Toggle theme">☀</button></header>

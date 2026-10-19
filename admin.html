@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NexusFind · Admin Verification</title>
+  <link rel="icon" href="images/favicon-32x32.png"><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="admin.css">
+</head>
+<body class="admin-body">
+  <div class="app-shell admin-shell">
+    <aside class="sidebar admin-sidebar">
+      <a class="brand admin-brand" href="index.html"><img class="brand-logo" src="images/logo_nexusfind.png" alt="NexusFind logo"><span class="brand-name">Nexus<span>Find</span></span></a>
+      <nav class="nav" aria-label="Admin navigation"><a class="nav-link" href="index.html">← Main site</a><span class="nav-link active"><i>✓</i>Admin Verification</span></nav>
+      <div class="sidebar-bottom"><button class="theme-button" id="adminTheme" type="button">☀ <span>Toggle theme</span></button><button class="logout-button" id="adminLogout" type="button">Sign out</button></div>
+    </aside>
+    <main class="content admin-content">
+      <header class="mobile-bar admin-mobile"><a href="index.html" aria-label="Back to NexusFind">←</a><strong>NexusFind · Admin</strong><button id="adminThemeMobile" type="button" aria-label="Toggle theme">☀</button><button id="adminLogoutMobile" type="button">Sign out</button></header>
+      <section class="page admin-page">
+        <header class="section-heading admin-heading"><div><h1 class="page-title">Admin Verification</h1><p class="subtitle">Review ownership evidence, record decisions, and coordinate item pickup.</p></div></header>
+        <p id="adminMessage" class="subtitle" role="status">Checking administrator access…</p>
+        <section id="adminSummary" class="admin-summary" aria-label="Claim summary"></section>
+        <section id="adminInbox" class="notification-list" aria-label="Admin notifications"></section>
+        <div class="admin-section-heading"><h2>Ownership claims</h2><p>Pending claims need a decision. Approved claims can move to pickup coordination.</p></div>
+        <section id="pendingClaims" class="admin-claims" aria-live="polite"><div class="admin-loading">Loading claims…</div></section>
+      </section>
+    </main>
+  </div>
+  <div class="toast" id="adminToast" role="status"></div>
+  <script type="module" src="js/admin.js"></script>
+</body>
+</html>

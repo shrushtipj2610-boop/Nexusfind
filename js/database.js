@@ -16,7 +16,7 @@ async function createPotentialMatches(reportId, report) {
     for (const candidateSnapshot of candidates.docs) {
       const other = { id: candidateSnapshot.id, ...candidateSnapshot.data() };
       if (other.type !== opposite || other.id === reportId || !other.userId
-        || ['returned', 'resolved', 'closed', 'rejected', 'archived'].includes(String(other.status || '').toLowerCase())) continue;
+        || ['returned', 'resolved', 'recovered', 'closed', 'rejected', 'archived'].includes(String(other.status || '').toLowerCase())) continue;
       const lost = report.type === 'lost' ? { ...report, id: reportId } : other;
       const found = report.type === 'found' ? { ...report, id: reportId } : other;
       const { score, matchedFields, matchLevel } = calculateMatchScore(lost, found);
@@ -232,4 +232,94 @@ export function watchNotifications(callback, onError) {
 export async function markNotificationRead(id) {
   if (!isConfigured || !db || !id) throw new Error('Notification is unavailable.');
   await updateDoc(doc(db, 'notifications', id), { read: true });
+}
+
+export function watchClaimsForUser(callback, onError) {
+  if (!auth?.currentUser) { callback([]); return () => {}; }
+  return onSnapshot(query(collection(db, 'claims'), where('claimantId', '==', auth.currentUser.uid)), (snapshot) => {
+    void Promise.all(snapshot.docs.map(async (entry) => {
+      const claim = { id: entry.id, ...entry.data() };
+      claim.item = await getItemReport(claim.itemId).catch(() => null);
+      return claim;
+    })).then((claims) => callback(claims.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)))).catch(onError);
+  }, onError);
+}
+
+export async function submitOwnershipClaim(itemId, reason, evidence) {
+  const user = auth?.currentUser;
+  if (!user) throw new Error('Sign in before claiming an item.');
+  if (!itemId || reason.trim().length < 10 || evidence.trim().length < 10) throw new Error('Add a clear reason and ownership details (at least 10 characters each).');
+  const itemRef = doc(db, 'items', itemId);
+  const claimRef = doc(collection(db, 'claims'));
+  const activeRef = doc(db, 'activeClaims', `${itemId}_${user.uid}`);
+  const reviewNotice = doc(collection(db, 'notifications'));
+  await runTransaction(db, async (tx) => {
+    const [itemSnap, activeSnap] = await Promise.all([tx.get(itemRef), tx.get(activeRef)]);
+    if (!itemSnap.exists() || itemSnap.data().type !== 'found') throw new Error('This found item is unavailable for claims.');
+    if (itemSnap.data().reservedFor || ['returned', 'resolved', 'recovered', 'closed'].includes(String(itemSnap.data().status).toLowerCase())) throw new Error('This item has already been reserved or recovered.');
+    if (activeSnap.exists()) throw new Error('You already have an active claim for this item.');
+    tx.set(claimRef, { itemId, itemName: itemSnap.data().itemName, claimantId: user.uid, claimantName: user.displayName || user.email || 'User', claimantEmail: user.email || '', reason: reason.trim(), evidence: evidence.trim(), status: 'Pending', createdAt: serverTimestamp() });
+    tx.set(activeRef, { claimId: claimRef.id, itemId, claimantId: user.uid, status: 'Pending' });
+    tx.set(reviewNotice, { type: 'claim_submitted', audience: 'admins', title: 'Ownership claim needs review', message: `A claim was submitted for ${itemSnap.data().itemName}.`, claimId: claimRef.id, itemId, read: false, createdAt: serverTimestamp() });
+  });
+  return claimRef.id;
+}
+
+export function watchPendingClaims(callback, onError) {
+  return onSnapshot(query(collection(db, 'claims'), where('status', '==', 'Pending')), (snapshot) => callback(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }))), onError);
+}
+
+export async function decideOwnershipClaim(claimId, decision, rejectionReason = '') {
+  if (!['Approved', 'Rejected'].includes(decision)) throw new Error('Invalid claim decision.');
+  const admin = auth?.currentUser;
+  if (!admin) throw new Error('Sign in with an administrator account.');
+  const claimRef = doc(db, 'claims', claimId);
+  const decisionNotice = doc(collection(db, 'notifications'));
+  await runTransaction(db, async (tx) => {
+    const claimSnap = await tx.get(claimRef);
+    if (!claimSnap.exists()) throw new Error('This claim no longer exists.');
+    const claim = claimSnap.data(), itemRef = doc(db, 'items', claim.itemId);
+    const itemSnap = await tx.get(itemRef);
+    if (!itemSnap.exists() || claim.status !== 'Pending') throw new Error('This claim has already been decided or its item is unavailable.');
+    if (decision === 'Approved' && (itemSnap.data().reservedFor || ['returned', 'resolved', 'recovered', 'closed'].includes(String(itemSnap.data().status).toLowerCase()))) throw new Error('This item has already been reserved or recovered.');
+    tx.update(claimRef, { status: decision, decision, decisionReason: decision === 'Rejected' ? rejectionReason.trim().slice(0, 1000) : '', decidedBy: admin.uid, decidedAt: serverTimestamp() });
+    const activeRef = doc(db, 'activeClaims', `${claim.itemId}_${claim.claimantId}`);
+    if (decision === 'Approved') tx.update(activeRef, { status: decision });
+    else tx.delete(activeRef);
+    if (decision === 'Approved') tx.update(itemRef, { status: 'reserved', reservedFor: claim.claimantId, reservedClaimId: claimId, updatedAt: serverTimestamp() });
+    const reasonText = decision === 'Rejected' && rejectionReason.trim() ? ` Reason: ${rejectionReason.trim().slice(0, 1000)}` : '';
+    tx.set(decisionNotice, { type: 'claim_decision', title: `Claim ${decision.toLowerCase()}`, message: `Your claim for ${claim.itemName} was ${decision.toLowerCase()}.${reasonText}`, userId: claim.claimantId, claimId, itemId: claim.itemId, read: false, createdAt: serverTimestamp() });
+  });
+}
+
+export async function coordinateClaimPickup(claimId, pickupDetails) {
+  const admin = auth?.currentUser;
+  if (!admin || !pickupDetails.trim()) throw new Error('Add pickup location and timing details.');
+  const claimRef = doc(db, 'claims', claimId), noticeRef = doc(collection(db, 'notifications'));
+  await runTransaction(db, async (tx) => {
+    const snapshot = await tx.get(claimRef);
+    if (!snapshot.exists() || snapshot.data().status !== 'Approved') throw new Error('Only approved claims can be coordinated for pickup.');
+    const claim = snapshot.data();
+    if (claim.pickupStatus === 'Recovered') throw new Error('This item has already been marked recovered.');
+    tx.update(claimRef, { pickupStatus: 'Coordinated', pickupDetails: pickupDetails.trim().slice(0, 1000), pickupCoordinatedBy: admin.uid, pickupCoordinatedAt: serverTimestamp() });
+    tx.set(noticeRef, { type: 'pickup_update', title: 'Pickup coordinated', message: `Pickup details for ${claim.itemName}: ${pickupDetails.trim().slice(0, 1000)}`, userId: claim.claimantId, claimId, itemId: claim.itemId, read: false, createdAt: serverTimestamp() });
+  });
+}
+
+export async function confirmClaimReceived(claimId) {
+  const claimant = auth?.currentUser;
+  if (!claimant) throw new Error('Sign in before confirming pickup.');
+  const claimRef = doc(db, 'claims', claimId), recoveredNotice = doc(collection(db, 'notifications')), adminNotice = doc(collection(db, 'notifications'));
+  await runTransaction(db, async (tx) => {
+    const claimSnap = await tx.get(claimRef);
+    if (!claimSnap.exists()) throw new Error('This claim no longer exists.');
+    const claim = claimSnap.data();
+    if (claim.claimantId !== claimant.uid || claim.status !== 'Approved' || claim.pickupStatus !== 'Coordinated') throw new Error('Pickup must be coordinated before you can confirm receipt.');
+    const itemRef = doc(db, 'items', claim.itemId), itemSnap = await tx.get(itemRef);
+    if (!itemSnap.exists() || itemSnap.data().reservedClaimId !== claimRef.id || itemSnap.data().reservedFor !== claimant.uid) throw new Error('This item is no longer reserved for your claim.');
+    tx.update(claimRef, { pickupStatus: 'Recovered', receivedAt: serverTimestamp() });
+    tx.update(itemRef, { status: 'recovered', updatedAt: serverTimestamp() });
+    tx.set(recoveredNotice, { type: 'recovery_update', title: 'Item marked recovered', message: `${claim.itemName} was marked recovered after the claimant confirmed receipt.`, userId: itemSnap.data().userId, claimId: claimRef.id, itemId: claim.itemId, read: false, createdAt: serverTimestamp() });
+    tx.set(adminNotice, { type: 'recovery_update', audience: 'admins', title: 'Pickup confirmed', message: `${claim.itemName} was marked recovered by the claimant.`, claimId: claimRef.id, itemId: claim.itemId, read: false, createdAt: serverTimestamp() });
+  });
 }

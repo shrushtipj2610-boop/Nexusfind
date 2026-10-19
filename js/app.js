@@ -1,5 +1,7 @@
-import { createItemReport, getItemReport, markNotificationRead, watchItemReports, watchNotifications, watchMatchesForUser, getMatchDetails, updateMatchStatus } from './database.js';
-import { getCurrentUser, logout, signUp, watchAuthentication } from './auth.js';
+import { createItemReport, getItemReport, markNotificationRead, watchItemReports, watchNotifications, watchMatchesForUser, getMatchDetails, updateMatchStatus, submitOwnershipClaim, watchClaimsForUser, confirmClaimReceived } from './database.js';
+import { getCurrentUser, logout, signIn, signUp, watchAuthentication } from './auth.js';
+import { doc, getDoc } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
+import { db } from './firebase.js';
 
 const authRoot = document.querySelector('#auth-root');
 const appShell = document.querySelector('#app-shell');
@@ -41,7 +43,7 @@ function firebaseErrorMessage(error) {
 }
 
 function renderCreateAccount(setupError = '', selectedRole = 'student') {
-  authRoot.innerHTML = `<div class="auth-card-wrap"><img class="auth-logo" src="images/logo_nexusfind.png" alt="NexusFind logo"><h1 class="auth-title">Nexus<span>Find</span></h1><p class="auth-subtitle">Smart Lost & Found Portal</p><section class="auth-card"><h2>Create your account</h2><p>Join your campus lost & found community.</p><span class="auth-role-label">SIGN UP AS</span><div class="auth-roles"><button class="auth-role ${selectedRole === 'student' ? 'active' : ''}" data-role="student" type="button">🎓 &nbsp;Student</button><button class="auth-role ${selectedRole === 'staff' ? 'active' : ''}" data-role="staff" type="button">👤 &nbsp;Staff</button></div><form class="auth-form" id="auth-form" novalidate><div class="field"><label for="auth-name">Full name</label><input class="input" id="auth-name" autocomplete="name" placeholder="Your full name" required></div><div class="field"><label for="auth-email">College email</label><input class="input" id="auth-email" name="email" type="email" autocomplete="email" placeholder="e.g. student@college.edu" required></div><div class="field"><label for="auth-password">Password</label><input class="input" id="auth-password" type="password" autocomplete="new-password" placeholder="Enter your password" required></div><div class="field"><label for="auth-confirm-password">Confirm password</label><input class="input" id="auth-confirm-password" type="password" autocomplete="new-password" placeholder="Confirm your password" required></div><p class="auth-error" id="auth-error">${setupError}</p><button class="button" type="submit">Create Account</button></form></section></div>`;
+  authRoot.innerHTML = `<div class="auth-card-wrap"><img class="auth-logo" src="images/logo_nexusfind.png" alt="NexusFind logo"><h1 class="auth-title">Nexus<span>Find</span></h1><p class="auth-subtitle">Smart Lost & Found Portal</p><section class="auth-card"><h2>Create your account</h2><p>Join your campus lost & found community.</p><span class="auth-role-label">SIGN UP AS</span><div class="auth-roles"><button class="auth-role ${selectedRole === 'student' ? 'active' : ''}" data-role="student" type="button">🎓 &nbsp;Student</button><button class="auth-role ${selectedRole === 'staff' ? 'active' : ''}" data-role="staff" type="button">👤 &nbsp;Staff</button></div><form class="auth-form" id="auth-form" novalidate><div class="field"><label for="auth-name">Full name</label><input class="input" id="auth-name" autocomplete="name" placeholder="Your full name" required></div><div class="field"><label for="auth-email">College email</label><input class="input" id="auth-email" name="email" type="email" autocomplete="email" placeholder="e.g. student@college.edu" required></div><div class="field"><label for="auth-password">Password</label><input class="input" id="auth-password" type="password" autocomplete="new-password" placeholder="Enter your password" required></div><div class="field"><label for="auth-confirm-password">Confirm password</label><input class="input" id="auth-confirm-password" type="password" autocomplete="new-password" placeholder="Confirm your password" required></div><p class="auth-error" id="auth-error">${setupError}</p><button class="button" type="submit">Create Account</button></form><p class="auth-footnote">Already registered? <button class="auth-switch" id="show-login" type="button">Sign in</button></p></section></div>`;
   document.querySelectorAll('[data-role]').forEach((button) => { button.onclick = () => renderCreateAccount(setupError, button.dataset.role); });
   document.querySelector('#auth-form').onsubmit = async (event) => {
     event.preventDefault();
@@ -61,6 +63,13 @@ function renderCreateAccount(setupError = '', selectedRole = 'student') {
       submitButton.textContent = 'Create Account';
     }
   };
+  document.querySelector('#show-login')?.addEventListener('click', () => renderLogin());
+}
+
+function renderLogin(setupError = '') {
+  authRoot.innerHTML = `<div class="auth-card-wrap"><img class="auth-logo" src="images/logo_nexusfind.png" alt="NexusFind logo"><h1 class="auth-title">Nexus<span>Find</span></h1><p class="auth-subtitle">Smart Lost & Found Portal</p><section class="auth-card"><h2>Welcome back</h2><p>Sign in to your campus account.</p><form class="auth-form" id="login-form" novalidate><div class="field"><label for="login-email">College email</label><input class="input" id="login-email" type="email" autocomplete="email" required></div><div class="field"><label for="login-password">Password</label><input class="input" id="login-password" type="password" autocomplete="current-password" required></div><p class="auth-error" id="login-error">${setupError}</p><button class="button" type="submit">Sign In</button></form><p class="auth-footnote">New to NexusFind? <button class="auth-switch" id="show-signup" type="button">Create an account</button></p></section></div>`;
+  document.querySelector('#login-form').onsubmit = async (event) => { event.preventDefault(); const form = event.currentTarget, button = form.querySelector('button[type="submit"]'), error = document.querySelector('#login-error'); if (!form.reportValidity()) return; button.disabled = true; button.textContent = 'Signing in…'; error.textContent = ''; try { await signIn(document.querySelector('#login-email').value, document.querySelector('#login-password').value); } catch (authError) { error.textContent = firebaseErrorMessage(authError); button.disabled = false; button.textContent = 'Sign In'; } };
+  document.querySelector('#show-signup').onclick = () => renderCreateAccount();
 }
 
 async function showDashboard() {
@@ -70,8 +79,14 @@ async function showDashboard() {
   // authenticated Firestore inbox returns its real unread count.
   document.querySelectorAll('.notify-link em, .notify-link i b').forEach((badge) => { badge.hidden = true; });
   document.querySelector('#logoutButton').disabled = false;
+  const adminNav = document.querySelector('#adminNav');
+  if (adminNav && getCurrentUser()?.uid && db) {
+    adminNav.hidden = true;
+    try { adminNav.hidden = !(await getDoc(doc(db, 'admins', getCurrentUser().uid))).exists(); }
+    catch (error) { console.warn('Admin navigation access check failed:', error); }
+  }
   if (!dashboardLoaded) {
-    window.NexusFind = { createItemReport, getItemReport, markNotificationRead, watchItemReports, watchNotifications, watchMatchesForUser, getMatchDetails, updateMatchStatus, currentUser: getCurrentUser, applyLogoTheme };
+    window.NexusFind = { createItemReport, getItemReport, markNotificationRead, watchItemReports, watchNotifications, watchMatchesForUser, getMatchDetails, updateMatchStatus, submitOwnershipClaim, watchClaimsForUser, confirmClaimReceived, currentUser: getCurrentUser, applyLogoTheme };
     await import('./script.js');
     dashboardLoaded = true;
   }
@@ -79,7 +94,7 @@ async function showDashboard() {
 
 watchAuthentication((user, error) => {
   if (user) showDashboard();
-  else { appShell.hidden = true; authRoot.hidden = false; renderCreateAccount(error?.message || ''); applyLogoTheme(); }
+  else { appShell.hidden = true; authRoot.hidden = false; document.querySelector('#adminNav').hidden = true; if (!document.querySelector('#login-form')) renderCreateAccount(error?.message || ''); applyLogoTheme(); }
 });
 
 document.querySelector('#logoutButton').addEventListener('click', async () => {

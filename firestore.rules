@@ -1,6 +1,9 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isAdmin() {
+      return request.auth != null && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
     // The login form resolves a username to its Firebase email before the
     // user is authenticated. Exact document reads are allowed, while queries
     // and list operations remain denied.
@@ -20,13 +23,31 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow create: if request.auth != null
         && request.resource.data.userId == request.auth.uid
+        && !('reservedFor' in request.resource.data)
+        && !('reservedClaimId' in request.resource.data)
         && request.resource.data.type in ['lost', 'found']
         && request.resource.data.itemName is string
         && request.resource.data.category is string
         && request.resource.data.description is string;
       allow update: if request.auth != null
-        && resource.data.userId == request.auth.uid
-        && request.resource.data.userId == resource.data.userId;
+        && ((isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reservedFor', 'reservedClaimId', 'updatedAt'])
+          && resource.data.type == 'found' && resource.data.status in ['found', 'active']
+          && !('reservedFor' in resource.data)
+          && request.resource.data.status == 'reserved'
+          && request.resource.data.reservedFor is string
+          && existsAfter(/databases/$(database)/documents/claims/$(request.resource.data.reservedClaimId))
+          && getAfter(/databases/$(database)/documents/claims/$(request.resource.data.reservedClaimId)).data.status == 'Approved'
+          && getAfter(/databases/$(database)/documents/claims/$(request.resource.data.reservedClaimId)).data.claimantId == request.resource.data.reservedFor
+          && getAfter(/databases/$(database)/documents/claims/$(request.resource.data.reservedClaimId)).data.itemId == itemId)
+          || (request.auth.uid == resource.data.reservedFor && request.resource.data.status == 'recovered'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+            && existsAfter(/databases/$(database)/documents/claims/$(resource.data.reservedClaimId))
+            && getAfter(/databases/$(database)/documents/claims/$(resource.data.reservedClaimId)).data.claimantId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/claims/$(resource.data.reservedClaimId)).data.pickupStatus == 'Recovered')
+          || (resource.data.userId == request.auth.uid
+            && request.resource.data.userId == resource.data.userId
+            && (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['itemName', 'category', 'description', 'location', 'dateLost', 'dateFound', 'color', 'storageLocation', 'imageUrl', 'updatedAt'])
+              || (request.resource.data.status == 'resolved' && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])))));
       allow delete: if request.auth != null
         && resource.data.userId == request.auth.uid;
     }
@@ -48,7 +69,7 @@ service cloud.firestore {
 
     match /notifications/{notificationId} {
       allow read: if request.auth != null
-        && resource.data.userId == request.auth.uid;
+        && (resource.data.userId == request.auth.uid || (isAdmin() && resource.data.audience == 'admins'));
       // Report notifications are written after the report itself is confirmed.
       // Their deterministic ID and ownership check preserve one notification/report.
       allow create: if request.auth != null
@@ -65,15 +86,89 @@ service cloud.firestore {
         || (request.resource.data.type == 'match_update'
           && existsAfter(/databases/$(database)/documents/matches/$(request.resource.data.matchId))
           && request.auth.uid in [getAfter(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.lostUserId, getAfter(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.foundUserId]
-          && request.resource.data.userId in [getAfter(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.lostUserId, getAfter(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.foundUserId]));
+          && request.resource.data.userId in [getAfter(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.lostUserId, getAfter(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.foundUserId])
+        || (request.resource.data.type == 'claim_submitted' && request.resource.data.audience == 'admins' && request.auth != null
+          && existsAfter(/databases/$(database)/documents/claims/$(request.resource.data.claimId))
+          && getAfter(/databases/$(database)/documents/claims/$(request.resource.data.claimId)).data.claimantId == request.auth.uid
+          && getAfter(/databases/$(database)/documents/claims/$(request.resource.data.claimId)).data.status == 'Pending')
+        || (request.resource.data.type == 'claim_decision' && isAdmin() && existsAfter(/databases/$(database)/documents/claims/$(request.resource.data.claimId))
+          && getAfter(/databases/$(database)/documents/claims/$(request.resource.data.claimId)).data.claimantId == request.resource.data.userId
+          && getAfter(/databases/$(database)/documents/claims/$(request.resource.data.claimId)).data.status in ['Approved', 'Rejected'])
+        || (request.resource.data.type == 'pickup_update' && isAdmin()
+          && getAfter(/databases/$(database)/documents/claims/$(request.resource.data.claimId)).data.pickupStatus == 'Coordinated'
+          && getAfter(/databases/$(database)/documents/claims/$(request.resource.data.claimId)).data.claimantId == request.resource.data.userId)
+        || (request.resource.data.type == 'recovery_update'
+          && request.auth.uid == getAfter(/databases/$(database)/documents/claims/$(request.resource.data.claimId)).data.claimantId
+          && getAfter(/databases/$(database)/documents/claims/$(request.resource.data.claimId)).data.pickupStatus == 'Recovered'
+          && ((request.resource.data.audience == 'admins' && request.auth.uid == getAfter(/databases/$(database)/documents/claims/$(request.resource.data.claimId)).data.claimantId)
+            || request.resource.data.userId == get(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data.userId)));
       // Students may only mark an unread notification as read; no notification
       // text, link, type, or ownership data can be altered.
-      allow update: if request.auth != null
-        && resource.data.userId == request.auth.uid
-        && resource.data.read == false
+      allow update: if request.auth != null && resource.data.read == false
         && request.resource.data.read == true
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+        && (resource.data.userId == request.auth.uid || (isAdmin() && resource.data.audience == 'admins'));
       allow delete: if false;
+    }
+
+    match /admins/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    match /claims/{claimId} {
+      allow create: if request.auth != null
+        && request.resource.data.claimantId == request.auth.uid
+        && request.resource.data.status == 'Pending'
+        && request.resource.data.itemId is string
+        && request.resource.data.reason is string && request.resource.data.reason.size() >= 10 && request.resource.data.reason.size() <= 1200
+        && request.resource.data.evidence is string && request.resource.data.evidence.size() >= 10 && request.resource.data.evidence.size() <= 1200
+        && request.resource.data.claimantEmail == request.auth.token.email
+        && request.resource.data.keys().hasOnly(['itemId', 'itemName', 'claimantId', 'claimantName', 'claimantEmail', 'reason', 'evidence', 'status', 'createdAt'])
+        && existsAfter(/databases/$(database)/documents/activeClaims/$(request.resource.data.itemId + '_' + request.auth.uid))
+        && getAfter(/databases/$(database)/documents/activeClaims/$(request.resource.data.itemId + '_' + request.auth.uid)).data.claimId == claimId
+        && get(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data.type == 'found'
+        && get(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data.userId != request.auth.uid
+        && !('reservedFor' in get(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data)
+        && get(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data.status in ['found', 'active'];
+      allow read: if request.auth != null && (resource.data.claimantId == request.auth.uid || isAdmin());
+      allow update: if (isAdmin() && resource.data.status == 'Pending'
+        && request.resource.data.status in ['Approved', 'Rejected']
+        && request.resource.data.decision == request.resource.data.status
+        && request.resource.data.decidedBy == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'decision', 'decisionReason', 'decidedBy', 'decidedAt'])
+        && ((request.resource.data.status == 'Approved'
+          && getAfter(/databases/$(database)/documents/items/$(resource.data.itemId)).data.reservedFor == resource.data.claimantId
+          && getAfter(/databases/$(database)/documents/items/$(resource.data.itemId)).data.reservedClaimId == claimId)
+          || (request.resource.data.status == 'Rejected'
+            && !existsAfter(/databases/$(database)/documents/activeClaims/$(resource.data.itemId + '_' + resource.data.claimantId))))
+        || (isAdmin() && resource.data.status == 'Approved' && (!('pickupStatus' in resource.data) || resource.data.pickupStatus != 'Recovered')
+          && request.resource.data.pickupStatus == 'Coordinated'
+          && request.resource.data.pickupCoordinatedBy == request.auth.uid
+          && request.resource.data.pickupDetails is string
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pickupStatus', 'pickupDetails', 'pickupCoordinatedBy', 'pickupCoordinatedAt']))
+        || (request.auth != null && resource.data.claimantId == request.auth.uid
+          && resource.data.status == 'Approved' && resource.data.pickupStatus == 'Coordinated'
+          && request.resource.data.pickupStatus == 'Recovered'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pickupStatus', 'receivedAt'])
+          && getAfter(/databases/$(database)/documents/items/$(resource.data.itemId)).data.status == 'recovered'
+          && getAfter(/databases/$(database)/documents/items/$(resource.data.itemId)).data.reservedClaimId == claimId));
+      allow delete: if false;
+    }
+
+    match /activeClaims/{activeId} {
+      allow get: if request.auth != null && (!exists(/databases/$(database)/documents/activeClaims/$(activeId)) || resource.data.claimantId == request.auth.uid || isAdmin());
+      allow list: if isAdmin() || (request.auth != null && resource.data.claimantId == request.auth.uid);
+      allow create: if request.auth != null && request.resource.data.claimantId == request.auth.uid
+        && request.resource.data.status == 'Pending'
+        && existsAfter(/databases/$(database)/documents/claims/$(request.resource.data.claimId))
+        && getAfter(/databases/$(database)/documents/claims/$(request.resource.data.claimId)).data.claimantId == request.auth.uid;
+      allow update: if isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        && request.resource.data.status == 'Approved'
+        && getAfter(/databases/$(database)/documents/claims/$(resource.data.claimId)).data.status == 'Approved';
+      allow delete: if isAdmin()
+        && existsAfter(/databases/$(database)/documents/claims/$(resource.data.claimId))
+        && getAfter(/databases/$(database)/documents/claims/$(resource.data.claimId)).data.status == 'Rejected';
     }
 
     match /matches/{matchId} {

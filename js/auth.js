@@ -2,6 +2,7 @@ import { auth, db, isConfigured } from './firebase.js';
 import { doc, setDoc } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 import {
   createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
   onAuthStateChanged,
   signOut,
   updateProfile
@@ -49,4 +50,10 @@ export async function signUp(name, email, password, confirmPassword, role) {
 export async function logout() {
   requireAuthConfiguration();
   return signOut(auth);
+}
+
+export async function signIn(email, password) {
+  requireAuthConfiguration();
+  if (!email.trim() || !password) throw new Error('Enter your email and password.');
+  return signInWithEmailAndPassword(auth, email.trim(), password);
 }
