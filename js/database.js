@@ -164,7 +164,7 @@ export async function updateMatchStatus(id, action) {
     if (!snapshot.exists()) throw new Error('This match is no longer available.');
     const match = snapshot.data(), uid = auth.currentUser.uid;
     if (![match.lostUserId, match.foundUserId].includes(uid)) throw new Error('You cannot update this match.');
-    const next = action === 'claim' && match.status === 'potential' ? 'claim_requested'
+    const next = action === 'claim' && match.status === 'potential' && uid === match.lostUserId ? 'claim_requested'
       : action === 'confirm' && match.status === 'claim_requested' && uid !== match.claimedBy ? 'confirmed'
       : action === 'reject' && ['potential', 'claim_requested'].includes(match.status) ? 'rejected'
       : action === 'resolve' && match.status === 'confirmed' ? 'resolved' : null;
@@ -261,20 +261,35 @@ export function watchClaimsForUser(callback, onError) {
   return () => { generation += 1; stopClaims(); stopAuth(); };
 }
 
-export async function submitOwnershipClaim(itemId, reason, evidence) {
+export async function submitOwnershipClaim(itemId, reason, evidence, matchContext = null) {
   const user = auth?.currentUser;
   if (!user) throw new Error('Sign in before claiming an item.');
   if (!itemId || reason.trim().length < 10 || evidence.trim().length < 10) throw new Error('Add a clear reason and ownership details (at least 10 characters each).');
+  if (matchContext && !matchContext.matchId) throw new Error('The related match ID is missing. Reopen the match and try again.');
   const itemRef = doc(db, 'items', itemId);
   const claimRef = doc(collection(db, 'claims'));
   const activeRef = doc(db, 'activeClaims', `${itemId}_${user.uid}`);
   const reviewNotice = doc(db, 'notifications', `claim_submitted_${claimRef.id}`);
   await runTransaction(db, async (tx) => {
-    const [itemSnap, activeSnap] = await Promise.all([tx.get(itemRef), tx.get(activeRef)]);
+    const reads = [tx.get(itemRef), tx.get(activeRef)];
+    if (matchContext) reads.push(tx.get(doc(db, 'matches', matchContext.matchId)));
+    const [itemSnap, activeSnap, matchSnap] = await Promise.all(reads);
     if (!itemSnap.exists() || itemSnap.data().type !== 'found') throw new Error('This found item is unavailable for claims.');
     if (itemSnap.data().reservedFor || ['returned', 'resolved', 'recovered', 'closed'].includes(String(itemSnap.data().status).toLowerCase())) throw new Error('This item has already been reserved or recovered.');
     if (activeSnap.exists()) throw new Error('You already have an active claim for this item.');
-    tx.set(claimRef, { itemId, itemName: itemSnap.data().itemName, claimantId: user.uid, claimantName: user.displayName || user.email || 'User', claimantEmail: user.email || '', reason: reason.trim(), evidence: evidence.trim(), status: 'Pending', createdAt: serverTimestamp() });
+    let relatedMatch = null;
+    if (matchContext) {
+      if (!matchSnap?.exists()) throw new Error('The selected potential match no longer exists. Reopen the match and try again.');
+      relatedMatch = matchSnap.data();
+      if (relatedMatch.foundReportId !== itemId) throw new Error('The selected match points to a different found item. Reopen the intended match and try again.');
+      if (relatedMatch.lostUserId !== user.uid) throw new Error('Only the owner of the matched lost report can submit an ownership claim from this match.');
+      if (!relatedMatch.lostReportId || !relatedMatch.foundUserId) throw new Error('The selected match is missing its report references.');
+      const lostSnap = await tx.get(doc(db, 'items', relatedMatch.lostReportId));
+      if (!lostSnap.exists() || lostSnap.data().type !== 'lost' || lostSnap.data().userId !== user.uid) throw new Error('Your account does not own the lost report linked to this match.');
+      if (relatedMatch.foundUserId !== itemSnap.data().userId) throw new Error('The selected match does not belong to this found report. Reopen the match and try again.');
+    }
+    if (itemSnap.data().userId === user.uid) throw new Error('You cannot submit an ownership claim for a found item you reported.');
+    tx.set(claimRef, { itemId, itemName: itemSnap.data().itemName, claimantId: user.uid, claimantName: user.displayName || user.email || 'User', claimantEmail: user.email || '', reason: reason.trim(), evidence: evidence.trim(), status: 'Pending', ...(relatedMatch ? { matchId: matchContext.matchId, lostReportId: relatedMatch.lostReportId } : {}), createdAt: serverTimestamp() });
     tx.set(activeRef, { claimId: claimRef.id, itemId, claimantId: user.uid, status: 'Pending' });
     tx.set(reviewNotice, { type: 'claim_submitted', audience: 'admins', title: 'Ownership claim needs review', message: `A claim was submitted for ${itemSnap.data().itemName}.`, claimId: claimRef.id, itemId, read: false, createdAt: serverTimestamp() });
   });

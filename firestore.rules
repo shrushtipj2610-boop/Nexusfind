@@ -140,7 +140,16 @@ service cloud.firestore {
         && request.resource.data.evidence is string && request.resource.data.evidence.size() >= 10 && request.resource.data.evidence.size() <= 1200
         && request.resource.data.claimantEmail == request.auth.token.email
         && request.resource.data.createdAt == request.time
-        && request.resource.data.keys().hasOnly(['itemId', 'itemName', 'claimantId', 'claimantName', 'claimantEmail', 'reason', 'evidence', 'status', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['itemId', 'itemName', 'claimantId', 'claimantName', 'claimantEmail', 'reason', 'evidence', 'status', 'matchId', 'lostReportId', 'createdAt'])
+        && ((!('matchId' in request.resource.data) && !('lostReportId' in request.resource.data))
+          || ('matchId' in request.resource.data && 'lostReportId' in request.resource.data
+            && request.resource.data.matchId is string && request.resource.data.lostReportId is string
+            && exists(/databases/$(database)/documents/matches/$(request.resource.data.matchId))
+            && get(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.foundReportId == request.resource.data.itemId
+            && get(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.lostReportId == request.resource.data.lostReportId
+            && get(/databases/$(database)/documents/matches/$(request.resource.data.matchId)).data.lostUserId == request.auth.uid
+            && get(/databases/$(database)/documents/items/$(request.resource.data.lostReportId)).data.type == 'lost'
+            && get(/databases/$(database)/documents/items/$(request.resource.data.lostReportId)).data.userId == request.auth.uid))
         && existsAfter(/databases/$(database)/documents/activeClaims/$(request.resource.data.itemId + '_' + request.auth.uid))
         && getAfter(/databases/$(database)/documents/activeClaims/$(request.resource.data.itemId + '_' + request.auth.uid)).data.claimId == claimId
         && get(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data.type == 'found'
@@ -221,6 +230,7 @@ service cloud.firestore {
           && ((resource.data.status == 'potential' && request.resource.data.status in ['claim_requested', 'rejected']
             && ((request.resource.data.status == 'claim_requested'
                 && request.resource.data.claimedBy == request.auth.uid
+                && request.auth.uid == resource.data.lostUserId
                 && request.resource.data.claimRequestedAt == request.time)
               || (request.resource.data.status == 'rejected'
                 && ((!('claimRequestedAt' in resource.data) && !('claimRequestedAt' in request.resource.data))
