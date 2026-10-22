@@ -170,11 +170,13 @@ export async function updateMatchStatus(id, action) {
       : action === 'resolve' && match.status === 'confirmed' ? 'resolved' : null;
     if (!next) throw new Error('This action is not available for the current match status.');
     transaction.update(reference, { status: next, ...(action === 'claim' ? { claimedBy: uid, claimRequestedAt: serverTimestamp() } : {}), updatedAt: serverTimestamp() });
-    if (action !== 'reject') {
-      const other = uid === match.lostUserId ? match.foundUserId : match.lostUserId;
-      const notificationRef = doc(collection(db, 'notifications'));
-      transaction.set(notificationRef, { type: 'match_update', title: next === 'claim_requested' ? 'Match confirmation requested' : `Match ${next.replace('_', ' ')}`, message: next === 'claim_requested' ? 'A reporter believes the matched item may belong to them and is waiting for your response.' : `The potential match status is now ${next.replace('_', ' ')}.`, userId: other, matchId: id, reportId: uid === match.lostUserId ? match.lostReportId : match.foundReportId, read: false, createdAt: serverTimestamp() });
-    }
+    const other = uid === match.lostUserId ? match.foundUserId : match.lostUserId;
+    const notificationRef = doc(collection(db, 'notifications'));
+    const noticeText = next === 'claim_requested'
+      ? 'A reporter believes the matched item may belong to them and is waiting for your response.'
+      : next === 'rejected' ? 'The other reporter marked this suggested match as not a match.'
+      : `The potential match status is now ${next.replace('_', ' ')}.`;
+    transaction.set(notificationRef, { type: 'match_update', title: next === 'claim_requested' ? 'Match confirmation requested' : `Match ${next.replace('_', ' ')}`, message: noticeText, userId: other, matchId: id, reportId: uid === match.lostUserId ? match.lostReportId : match.foundReportId, read: false, createdAt: serverTimestamp() });
     if (next === 'resolved') {
       const ownReportId = uid === match.lostUserId ? match.lostReportId : match.foundReportId;
       transaction.update(doc(db, 'items', ownReportId), { status: 'resolved', updatedAt: serverTimestamp() });

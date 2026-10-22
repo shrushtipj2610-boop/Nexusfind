@@ -2,7 +2,7 @@
 
 Admin authorization uses the Firebase Authentication custom claim `admin: true`. Firestore Security Rules check the signed ID token claim directly. A profile field, local storage value, client email comparison, or `/admins/{uid}` document does not grant access. Public signup cannot assign custom claims.
 
-The provisioner is deliberately hardcoded to the one requested address, `shrushtipj@2610`, and Firebase project `nexusfind-7f8fc`. It resolves the account through Firebase Authentication, checks the exact email, assigns only that account's admin claim, then reloads the user record and verifies the claim. It preserves any existing custom claims. The address as supplied may not be a valid Firebase Auth email; if Firebase reports `invalid-email` or `user-not-found`, stop and obtain the exact email stored in Firebase Authentication. Do not use a display name or a Firestore profile value as a substitute.
+The provisioner is deliberately hardcoded to the designated address `shrushtipj2610@gmail.com` and Firebase project `nexusfind-7f8fc`. It resolves the account through Firebase Authentication, checks the exact email, assigns only that account's admin claim, then reloads the user record and verifies the claim. It preserves any existing custom claims. If Firebase reports `user-not-found`, stop and verify the exact email stored in Firebase Authentication. Do not use a display name or Firestore profile value as a substitute.
 
 ## Run the trusted provisioning script
 

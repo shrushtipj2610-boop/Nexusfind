@@ -3,7 +3,7 @@ import { getAuth } from 'firebase-admin/auth';
 
 // Deliberately fixed to the sole administrator account requested for NexusFind.
 const PROJECT_ID = 'nexusfind-7f8fc';
-const DESIGNATED_EMAIL = 'shrushtipj@2610';
+const DESIGNATED_EMAIL = 'shrushtipj2610@gmail.com';
 
 initializeApp({ credential: applicationDefault(), projectId: PROJECT_ID });
 
