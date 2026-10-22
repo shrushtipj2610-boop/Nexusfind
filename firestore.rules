@@ -2,14 +2,14 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function isAdmin() {
-      return request.auth != null && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      return request.auth != null && request.auth.token.admin == true;
     }
     // The login form resolves a username to its Firebase email before the
-    // user is authenticated. Exact document reads are allowed, while queries
-    // and list operations remain denied.
+    // user is authenticated. Exact document reads are public; only admins may
+    // list profiles for the administration dashboard.
     match /users/{usernameId} {
       allow get: if true;
-      allow list: if false;
+      allow list: if isAdmin();
       allow create: if request.auth != null
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.email == request.auth.token.email
@@ -30,7 +30,9 @@ service cloud.firestore {
         && request.resource.data.category is string
         && request.resource.data.description is string;
       allow update: if request.auth != null
-        && ((isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reservedFor', 'reservedClaimId', 'updatedAt'])
+        && ((isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+          && request.resource.data.status in ['active', 'pending', 'resolved', 'recovered', 'rejected', 'flagged'])
+          || (isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reservedFor', 'reservedClaimId', 'updatedAt'])
           && resource.data.type == 'found' && resource.data.status in ['found', 'active']
           && !('reservedFor' in resource.data)
           && request.resource.data.status == 'reserved'
@@ -103,6 +105,11 @@ service cloud.firestore {
           && getAfter(/databases/$(database)/documents/claims/$(request.resource.data.claimId)).data.claimantId == request.resource.data.userId
           && getAfter(/databases/$(database)/documents/claims/$(request.resource.data.claimId)).data.itemId == request.resource.data.itemId
           && getAfter(/databases/$(database)/documents/claims/$(request.resource.data.claimId)).data.status in ['Approved', 'Rejected'])
+        || (request.resource.data.type == 'report_status' && isAdmin()
+          && notificationId == 'admin_report_' + request.resource.data.itemId + '_' + getAfter(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data.status
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.keys().hasOnly(['type', 'title', 'message', 'userId', 'itemId', 'read', 'createdAt'])
+          && request.resource.data.userId == getAfter(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data.userId)
         || (request.resource.data.type == 'pickup_update' && isAdmin()
           && getAfter(/databases/$(database)/documents/claims/$(request.resource.data.claimId)).data.pickupStatus == 'Coordinated'
           && getAfter(/databases/$(database)/documents/claims/$(request.resource.data.claimId)).data.claimantId == request.resource.data.userId)
@@ -129,6 +136,18 @@ service cloud.firestore {
     match /admins/{uid} {
       allow read: if request.auth != null && request.auth.uid == uid;
       allow write: if false;
+    }
+
+    match /adminAudit/{entryId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin()
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.action is string
+        && request.resource.data.targetId is string
+        && request.resource.data.outcome in ['success', 'failure']
+        && request.resource.data.keys().hasOnly(['actorUid', 'action', 'targetId', 'from', 'to', 'outcome', 'createdAt']);
+      allow update, delete: if false;
     }
 
     match /claims/{claimId} {
@@ -163,11 +182,12 @@ service cloud.firestore {
         && request.resource.data.decidedBy == request.auth.uid
         && request.resource.data.decidedAt == request.time
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'decision', 'decisionReason', 'decidedBy', 'decidedAt'])
-        && ((request.resource.data.status == 'Approved'
+          && ((request.resource.data.status == 'Approved'
           && getAfter(/databases/$(database)/documents/items/$(resource.data.itemId)).data.reservedFor == resource.data.claimantId
           && getAfter(/databases/$(database)/documents/items/$(resource.data.itemId)).data.reservedClaimId == claimId)
           || (request.resource.data.status == 'Rejected'
             && request.resource.data.decisionReason is string
+            && request.resource.data.decisionReason.size() >= 3
             && request.resource.data.decisionReason.size() <= 1000
             && !existsAfter(/databases/$(database)/documents/activeClaims/$(resource.data.itemId + '_' + resource.data.claimantId))))
         || (isAdmin() && resource.data.status == 'Approved' && (!('pickupStatus' in resource.data) || resource.data.pickupStatus != 'Recovered')

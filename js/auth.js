@@ -5,7 +5,8 @@ import {
   signInWithEmailAndPassword,
   onAuthStateChanged,
   signOut,
-  updateProfile
+  updateProfile,
+  sendPasswordResetEmail
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 
 export function getCurrentUser() {
@@ -56,4 +57,10 @@ export async function signIn(email, password) {
   requireAuthConfiguration();
   if (!email.trim() || !password) throw new Error('Enter your email and password.');
   return signInWithEmailAndPassword(auth, email.trim(), password);
+}
+
+export async function sendPasswordReset(email) {
+  requireAuthConfiguration();
+  if (!email?.trim()) throw new Error('Enter your email address first.');
+  return sendPasswordResetEmail(auth, email.trim());
 }

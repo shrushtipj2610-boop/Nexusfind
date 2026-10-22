@@ -1,7 +1,6 @@
 import { createItemReport, getItemReport, markNotificationRead, watchItemReports, watchNotifications, watchMatchesForUser, getMatchDetails, updateMatchStatus, submitOwnershipClaim, watchClaimsForUser, confirmClaimReceived } from './database.js';
-import { getCurrentUser, logout, signIn, signUp, watchAuthentication } from './auth.js';
-import { doc, getDoc } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
-import { db } from './firebase.js';
+import { getCurrentUser, logout, signIn, signUp, sendPasswordReset, watchAuthentication } from './auth.js';
+import { getIdTokenResult } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 
 const authRoot = document.querySelector('#auth-root');
 const appShell = document.querySelector('#app-shell');
@@ -29,7 +28,14 @@ function firebaseErrorMessage(error) {
     'auth/invalid-email': 'Enter a valid email address.',
     'auth/weak-password': 'Choose a password with at least 6 characters.',
     'auth/too-many-requests': 'Too many login attempts. Please try again later.',
-    'auth/operation-not-allowed': 'Account creation is currently unavailable.',
+    'auth/operation-not-allowed': 'Email/password sign-in is disabled in Firebase Authentication for this project.',
+    'auth/invalid-credential': 'Firebase rejected this email and password. Check your password or use the sign-in provider linked to this account. If this account uses a password, try Forgot password.',
+    'auth/invalid-login-credentials': 'Firebase rejected this email and password. Check your password or use the sign-in provider linked to this account. If this account uses a password, try Forgot password.',
+    'auth/wrong-password': 'The password is incorrect. Try again or use Forgot password.',
+    'auth/user-not-found': 'No account was found for this email in the configured Firebase project.',
+    'auth/user-disabled': 'This account is disabled. Contact the site administrator.',
+    'auth/unauthorized-domain': 'This website domain is not authorized in Firebase Authentication. Add the current hostname in Firebase Console → Authentication → Settings → Authorized domains.',
+    'auth/unauthorized-continue-uri': 'The password-reset link domain is not authorized in Firebase Authentication.',
     'permission-denied': 'Username availability could not be checked. Deploy the users lookup rule before creating an account.',
     'unavailable': 'Firestore is unavailable. Check your connection and try again.',
     'deadline-exceeded': 'Firestore did not respond in time. Please try again.',
@@ -67,8 +73,19 @@ function renderCreateAccount(setupError = '', selectedRole = 'student') {
 }
 
 function renderLogin(setupError = '') {
-  authRoot.innerHTML = `<div class="auth-card-wrap"><img class="auth-logo" src="images/logo_nexusfind.png" alt="NexusFind logo"><h1 class="auth-title">Nexus<span>Find</span></h1><p class="auth-subtitle">Smart Lost & Found Portal</p><section class="auth-card"><h2>Welcome back</h2><p>Sign in to your campus account.</p><form class="auth-form" id="login-form" novalidate><div class="field"><label for="login-email">College email</label><input class="input" id="login-email" type="email" autocomplete="email" required></div><div class="field"><label for="login-password">Password</label><input class="input" id="login-password" type="password" autocomplete="current-password" required></div><p class="auth-error" id="login-error">${setupError}</p><button class="button" type="submit">Sign In</button></form><p class="auth-footnote">New to NexusFind? <button class="auth-switch" id="show-signup" type="button">Create an account</button></p></section></div>`;
+  authRoot.innerHTML = `<div class="auth-card-wrap"><img class="auth-logo" src="images/logo_nexusfind.png" alt="NexusFind logo"><h1 class="auth-title">Nexus<span>Find</span></h1><p class="auth-subtitle">Smart Lost & Found Portal</p><section class="auth-card"><h2>Welcome back</h2><p>Sign in to your campus account.</p><form class="auth-form" id="login-form" novalidate><div class="field"><label for="login-email">College email</label><input class="input" id="login-email" type="email" autocomplete="email" required></div><div class="field"><label for="login-password">Password</label><input class="input" id="login-password" type="password" autocomplete="current-password" required></div><p class="auth-error" id="login-error">${setupError}</p><button class="button" type="submit">Sign In</button></form><p class="auth-footnote">Forgot your password? <button class="auth-switch" id="forgot-password" type="button">Send reset email</button></p><p class="auth-footnote">New to NexusFind? <button class="auth-switch" id="show-signup" type="button">Create an account</button></p></section></div>`;
   document.querySelector('#login-form').onsubmit = async (event) => { event.preventDefault(); const form = event.currentTarget, button = form.querySelector('button[type="submit"]'), error = document.querySelector('#login-error'); if (!form.reportValidity()) return; button.disabled = true; button.textContent = 'Signing in…'; error.textContent = ''; try { await signIn(document.querySelector('#login-email').value, document.querySelector('#login-password').value); } catch (authError) { error.textContent = firebaseErrorMessage(authError); button.disabled = false; button.textContent = 'Sign In'; } };
+  document.querySelector('#forgot-password').onclick = async (event) => {
+    const button = event.currentTarget, email = document.querySelector('#login-email').value.trim(), error = document.querySelector('#login-error');
+    if (!email) { document.querySelector('#login-email').focus(); error.textContent = 'Enter your email address first.'; return; }
+    button.disabled = true; error.className = 'auth-error'; error.textContent = '';
+    try {
+      await sendPasswordReset(email);
+      error.className = 'auth-success';
+      error.textContent = 'If a password-based account exists for this email, Firebase has sent a reset message. Check your inbox and spam folder.';
+    } catch (resetError) { error.textContent = firebaseErrorMessage(resetError); }
+    finally { button.disabled = false; }
+  };
   document.querySelector('#show-signup').onclick = () => renderCreateAccount();
 }
 
@@ -80,9 +97,9 @@ async function showDashboard() {
   document.querySelectorAll('.notify-link em, .notify-link i b').forEach((badge) => { badge.hidden = true; });
   document.querySelector('#logoutButton').disabled = false;
   const adminNav = document.querySelector('#adminNav');
-  if (adminNav && getCurrentUser()?.uid && db) {
+  if (adminNav && getCurrentUser()?.uid) {
     adminNav.hidden = true;
-    try { adminNav.hidden = !(await getDoc(doc(db, 'admins', getCurrentUser().uid))).exists(); }
+    try { adminNav.hidden = (await getIdTokenResult(getCurrentUser(), true)).claims.admin !== true; }
     catch (error) { console.warn('Admin navigation access check failed:', error); }
   }
   if (!dashboardLoaded) {

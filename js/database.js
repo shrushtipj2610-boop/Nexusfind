@@ -302,6 +302,7 @@ export function watchPendingClaims(callback, onError) {
 
 export async function decideOwnershipClaim(claimId, decision, rejectionReason = '') {
   if (!['Approved', 'Rejected'].includes(decision)) throw new Error('Invalid claim decision.');
+  if (decision === 'Rejected' && String(rejectionReason).trim().length < 3) throw new Error('Add a rejection reason of at least 3 characters.');
   const admin = auth?.currentUser;
   if (!admin) throw new Error('Sign in with an administrator account.');
   const claimRef = doc(db, 'claims', claimId);
@@ -320,6 +321,7 @@ export async function decideOwnershipClaim(claimId, decision, rejectionReason = 
     if (decision === 'Approved') tx.update(itemRef, { status: 'reserved', reservedFor: claim.claimantId, reservedClaimId: claimId, updatedAt: serverTimestamp() });
     const reasonText = decision === 'Rejected' && rejectionReason.trim() ? ` Reason: ${rejectionReason.trim().slice(0, 1000)}` : '';
     tx.set(decisionNotice, { type: 'claim_decision', title: `Claim ${decision.toLowerCase()}`, message: `Your claim for ${claim.itemName} was ${decision.toLowerCase()}.${reasonText}`, userId: claim.claimantId, claimId, itemId: claim.itemId, read: false, createdAt: serverTimestamp() });
+    tx.set(doc(collection(db, 'adminAudit')), { actorUid: admin.uid, action: `claim_${decision.toLowerCase()}`, targetId: claimId, outcome: 'success', createdAt: serverTimestamp() });
   });
 }
 
@@ -334,6 +336,7 @@ export async function coordinateClaimPickup(claimId, pickupDetails) {
     if (claim.pickupStatus === 'Recovered') throw new Error('This item has already been marked recovered.');
     tx.update(claimRef, { pickupStatus: 'Coordinated', pickupDetails: pickupDetails.trim().slice(0, 1000), pickupCoordinatedBy: admin.uid, pickupCoordinatedAt: serverTimestamp() });
     tx.set(noticeRef, { type: 'pickup_update', title: 'Pickup coordinated', message: `Pickup details for ${claim.itemName}: ${pickupDetails.trim().slice(0, 1000)}`, userId: claim.claimantId, claimId, itemId: claim.itemId, read: false, createdAt: serverTimestamp() });
+    tx.set(doc(collection(db, 'adminAudit')), { actorUid: admin.uid, action: 'claim_pickup_coordinated', targetId: claimId, outcome: 'success', createdAt: serverTimestamp() });
   });
 }
 

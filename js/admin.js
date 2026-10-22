@@ -1,94 +1,53 @@
 import { auth, db } from './firebase.js';
-import { onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
-import { collection, doc, getDoc, onSnapshot, query, where, updateDoc } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
+import { onAuthStateChanged, signOut, getIdTokenResult } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
+import { collection, doc, getDoc, onSnapshot, query, where, updateDoc, getDocs, serverTimestamp, writeBatch } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 import { coordinateClaimPickup, decideOwnershipClaim } from './database.js';
 
-const message = document.querySelector('#adminMessage');
-const summaryRoot = document.querySelector('#adminSummary');
-const claimsRoot = document.querySelector('#pendingClaims');
-const inboxRoot = document.querySelector('#adminInbox');
-const escape = (value = '') => String(value).replace(/[&<>"']/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[char]);
-let stopClaims = () => {}, stopInbox = () => {};
-const dateText = (stamp) => stamp?.toDate?.().toLocaleString() || 'Recently';
-const clear = () => { stopClaims(); stopInbox(); };
-const showError = (error) => { message.textContent = error?.message || 'Something went wrong. Please try again.'; };
-
-function renderSummary(claims) {
-  const pending = claims.filter((claim) => claim.status === 'Pending').length;
-  const approved = claims.filter((claim) => claim.status === 'Approved').length;
-  const rejected = claims.filter((claim) => claim.status === 'Rejected').length;
-  const items = new Set(claims.filter((claim) => claim.status === 'Pending').map((claim) => claim.itemId));
-  summaryRoot.innerHTML = [['Pending Claims', pending], ['Approved Claims', approved], ['Rejected Claims', rejected], ['Items Awaiting Verification', items.size]].map(([label, count]) => `<article class="card admin-stat"><span>${escape(label)}</span><strong>${count}</strong></article>`).join('');
+const $ = (s) => document.querySelector(s), esc = (v='') => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const root = $('#adminView'), message = $('#adminMessage'), toast = $('#adminToast');
+const state = { items: [], claims: [], users: [], notices: [], logs: [], page: 'overview', filter: '', type: 'all', status: 'all', q: '', loc: '', category: 'all', reportDate: '', reportPage: 0, userPage: 0 };
+let stops = [];
+function tell(msg, error=false) { message.textContent = msg; message.classList.toggle('error', error); }
+function notify(msg) { toast.textContent=msg; toast.classList.add('show'); setTimeout(()=>toast.classList.remove('show'),2800); }
+function date(v) { return v?.toDate?.().toLocaleDateString() || '—'; }
+function time(v) { return v?.toDate?.().toLocaleString() || '—'; }
+function stat(label, value, note='') { return `<article class="card admin-stat"><span>${esc(label)}</span><strong>${value}</strong><small>${esc(note)}</small></article>`; }
+function statusBadge(v='unknown') { return `<span class="admin-badge ${esc(String(v).toLowerCase())}">${esc(v)}</span>`; }
+function activity(text, when) { return `<div class="admin-activity"><span>${esc(text)}</span><time>${esc(time(when))}</time></div>`; }
+function draw() {
+  const items=state.items, claims=state.claims;
+  const pending=claims.filter(c=>c.status==='Pending'), recovered=items.filter(i=>['recovered','returned'].includes(String(i.status||'').toLowerCase()));
+  const filtered=items.filter(i=>(state.type==='all'||i.type===state.type)&&(state.status==='all'||i.status===state.status)&&(state.category==='all'||i.category===state.category)&&(!state.q||`${i.itemName} ${i.id}`.toLowerCase().includes(state.q))&&(!state.loc||String(i.location||'').toLowerCase().includes(state.loc))&&(!state.reportDate||String(i.dateLost||i.dateFound||i.createdAt?.toDate?.().toISOString?.()||'').slice(0,10)===state.reportDate));
+  const recent=[...items.map(x=>({label:`${x.type||'Item'} report: ${x.itemName||'Untitled'}`,at:x.createdAt})),...claims.map(x=>({label:`Claim ${x.status}: ${x.itemName||'item'}`,at:x.createdAt}))].sort((a,b)=>(b.at?.toMillis?.()||0)-(a.at?.toMillis?.()||0)).slice(0,8);
+  const pages={
+    overview:`<div class="admin-summary">${stat('Registered users',state.users.length,'Firebase user profiles')}${stat('Lost reports',items.filter(i=>i.type==='lost').length)}${stat('Found reports',items.filter(i=>i.type==='found').length)}${stat('Pending claims',pending.length)}${stat('Successfully returned',recovered.length)}${stat('Awaiting verification',pending.length)}</div><div class="admin-grid"><section class="card admin-panel"><h2>Recent reports</h2>${items.slice().sort((a,b)=>(b.createdAt?.toMillis?.()||0)-(a.createdAt?.toMillis?.()||0)).slice(0,6).map(i=>activity(`${i.itemName||'Item'} · ${i.type} · ${i.status||'open'}`,i.createdAt)).join('')||'<p class="admin-empty">No reports yet.</p>'}</section><section class="card admin-panel"><h2>Recent activity</h2>${recent.map(x=>activity(x.label,x.at)).join('')||'<p class="admin-empty">No activity yet.</p>'}<h2 class="admin-subhead">Pending actions</h2><p>${pending.length} claim${pending.length===1?'':'s'} awaiting review</p><button class="button" data-go="claims">Review claims</button></section></div><div class="admin-grid"><section class="card admin-panel"><h2>Reports by type</h2><div class="bar-row"><span>Lost</span><div class="bar"><i style="width:${items.length?items.filter(i=>i.type==='lost').length/items.length*100:0}%"></i></div><b>${items.filter(i=>i.type==='lost').length}</b></div><div class="bar-row"><span>Found</span><div class="bar"><i class="found-bar" style="width:${items.length?items.filter(i=>i.type==='found').length/items.length*100:0}%"></i></div><b>${items.filter(i=>i.type==='found').length}</b></div></section><section class="card admin-panel"><h2>Report statuses</h2>${Object.entries(items.reduce((a,i)=>(a[i.status||'unknown']=(a[i.status||'unknown']||0)+1,a),{})).map(([k,v])=>activity(`${k} · ${v}`,null)).join('')||'<p class="admin-empty">No report data.</p>'}</section></div>`,
+    reports:`<div class="admin-toolbar"><input id="reportSearch" class="input" placeholder="Search report name or ID" value="${esc(state.q)}"><input id="locationFilter" class="input" placeholder="Filter location" value="${esc(state.loc)}"><select id="categoryFilter" class="input"><option value="all">All categories</option>${[...new Set(items.map(i=>i.category).filter(Boolean))].sort().map(c=>`<option value="${esc(c)}" ${state.category===c?'selected':''}>${esc(c)}</option>`).join('')}</select><input id="dateFilter" type="date" class="input" aria-label="Filter report date" value="${esc(state.reportDate)}"><select id="typeFilter" class="input"><option value="all">All types</option><option value="lost" ${state.type==='lost'?'selected':''}>Lost</option><option value="found" ${state.type==='found'?'selected':''}>Found</option></select><select id="statusFilter" class="input"><option value="all">All statuses</option>${['lost','found','active','pending','reserved','recovered','resolved','rejected','flagged'].map(s=>`<option ${state.status===s?'selected':''}>${s}</option>`).join('')}</select></div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Report</th><th>Type</th><th>Location</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead><tbody>${filtered.slice(state.reportPage*25,state.reportPage*25+25).map(i=>`<tr><td><b>${esc(i.itemName||'Untitled')}</b><small>${esc(i.category||'')} · ${esc(i.id)}</small>${i.imageUrl?`<a href="${esc(i.imageUrl)}" target="_blank" rel="noopener">View image</a>`:''}</td><td>${esc(i.type||'—')}</td><td>${esc(i.location||'—')}</td><td>${esc(date(i.createdAt||i.dateLost||i.dateFound))}</td><td>${statusBadge(i.status)}</td><td><select class="status-edit input" data-id="${esc(i.id)}"><option value="">Set status…</option>${['active','pending','resolved','recovered','rejected','flagged'].map(s=>`<option value="${s}">${s}</option>`).join('')}</select><button class="small-button flag-report" data-id="${esc(i.id)}">Flag</button></td></tr>`).join('')||'<tr><td colspan="6" class="admin-empty">No reports match these filters.</td></tr>'}</tbody></table></div><div class="admin-pagination"><button class="small-button" id="reportsPrev" ${state.reportPage===0?'disabled':''}>Previous</button><span>Page ${state.reportPage+1} of ${Math.max(1,Math.ceil(filtered.length/25))}</span><button class="small-button" id="reportsNext" ${state.reportPage+1>=Math.ceil(filtered.length/25)?'disabled':''}>Next</button></div>`,
+    users:`<div class="admin-toolbar"><input id="userSearch" class="input" placeholder="Search name or email" value="${esc(state.q)}"></div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>User</th><th>Email</th><th>Account type</th><th>Reports</th><th>Joined</th></tr></thead><tbody>${state.users.filter(u=>!state.q||`${u.username} ${u.email} ${u.uid}`.toLowerCase().includes(state.q)).slice(0,100).map(u=>`<tr><td>${esc(u.username||'User')}<small>${esc(u.uid)}</small></td><td>${esc(u.email||'—')}</td><td>${esc(u.role||'user')}</td><td>${items.filter(i=>i.userId===u.uid).length}</td><td>—</td></tr>`).join('')||'<tr><td colspan="5" class="admin-empty">No user profiles found.</td></tr>'}</tbody></table></div><p class="admin-hint">Account suspension is not supported by the current Firebase client architecture. No passwords or tokens are displayed.</p>`,
+    claims:`<div class="admin-claim-group">${claims.slice().sort((a,b)=>(b.createdAt?.toMillis?.()||0)-(a.createdAt?.toMillis?.()||0)).map(c=>{const item=items.find(i=>i.id===c.itemId),lost=items.find(i=>i.id===c.lostReportId);return `<article class="card admin-claim"><div class="admin-claim-photo">${item?.imageUrl?`<img src="${esc(item.imageUrl)}" alt="${esc(item.itemName||'Claimed item')}">`:'<span>Image unavailable</span>'}</div><div class="admin-claim-content"><div class="claim-row"><div><h3>${esc(c.itemName||item?.itemName||'Found item')}</h3><span class="claim-meta">Found report: ${esc(c.itemId)}${c.lostReportId?`<br>Related lost report: ${esc(lost?.itemName||c.lostReportId)} · ${esc(c.lostReportId)}`:''}<br>Claim: ${esc(c.id)}</span></div>${statusBadge(c.status)}</div><p><b>Claimant:</b> ${esc(c.claimantName||'User')} · ${esc(c.claimantEmail||'')}<br><b>Submitted:</b> ${esc(time(c.createdAt))}</p>${item?`<details class="admin-details"><summary>View related found report</summary><div class="summary">${esc(item.itemName||'')} · ${esc(item.category||'')}<br>${esc(item.location||'')}<br>${esc(item.description||'')}</div></details>`:''}${lost?`<details class="admin-details"><summary>View linked lost report</summary><div class="summary">${esc(lost.itemName||'')} · ${esc(lost.category||'')}<br>${esc(lost.location||'')}<br>${esc(lost.description||'')}</div></details>`:''}<details class="admin-details"><summary>Review private ownership evidence</summary><div class="summary"><strong>CLAIM REASON</strong>${esc(c.reason)}<br><strong>IDENTIFYING EVIDENCE</strong>${esc(c.evidence)}</div>${c.decisionReason?`<p>Decision reason: ${esc(c.decisionReason)}</p>`:''}</details>${c.status==='Pending'?`<div class="admin-actions"><button class="button claim-decision" data-id="${esc(c.id)}" data-decision="Approved">Approve</button><button class="small-button claim-decision reject" data-id="${esc(c.id)}" data-decision="Rejected">Reject</button></div>`:''}${c.status==='Approved'&&c.pickupStatus!=='Recovered'?`<button class="small-button coordinate-pickup" data-id="${esc(c.id)}">Coordinate pickup</button>`:''}</div></article>`}).join('')||'<p class="admin-empty">No claims found.</p>'}</div>`,
+    verification:`<p class="admin-hint">Verification requests are ownership claims. Claim evidence is visible only to authorized administrators and the claimant.</p><button class="button" data-go="claims">Open claims</button>`,
+    notifications:`${state.notices.map(n=>`<button class="notification ${n.read?'read':''}" data-notice="${esc(n.id)}"><span class="notice-copy"><b>${esc(n.title||n.type)}</b><p>${esc(n.message||'')}</p></span><time class="notice-time">${esc(time(n.createdAt))}</time></button>`).join('')||'<p class="admin-empty">No system notifications.</p>'}`,
+    analytics:`<div class="admin-summary">${stat('Total reports',items.length)}${stat('Claims',claims.length)}${stat('Recoveries',recovered.length)}${stat('Recovery rate',items.length?`${Math.round(recovered.length/items.length*100)}%`:'—','of all reports')}</div><div class="admin-grid"><section class="card admin-panel"><h2>Reports by category</h2>${Object.entries(items.reduce((a,i)=>(a[i.category||'Uncategorized']=(a[i.category||'Uncategorized']||0)+1,a),{})).map(([k,v])=>activity(`${k} · ${v}`,null)).join('')||'<p class="admin-empty">No category data yet.</p>'}</section><section class="card admin-panel"><h2>Claims and recoveries</h2>${['Pending','Approved','Rejected'].map(s=>activity(`${s} claims · ${claims.filter(c=>c.status===s).length}`,null)).join('')}${activity(`Recovered items · ${recovered.length}`,null)}</section></div>`,
+    settings:`<section class="card admin-panel"><h2>Admin access</h2><p>Administrator access is verified from the Firebase ID token custom claim. Public registration cannot set this claim.</p><p>Action audit records are stored in the <code>adminAudit</code> collection.</p><p>Account suspension is unavailable until a trusted backend integrates Firebase Authentication account controls.</p></section>`
+  };
+  const titles={overview:'Overview',reports:'Manage Lost & Found Reports',users:'Manage Users',claims:'Manage Claims',verification:'Verification Requests',notifications:'Notifications',analytics:'Reports & Analytics',settings:'Settings'};
+  $('#adminTitle').textContent=titles[state.page]||'Overview'; root.innerHTML=pages[state.page]||pages.overview;
+  document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>navigate(b.dataset.go));
+  $('#reportSearch')?.addEventListener('input',e=>{const caret=e.target.selectionStart;state.q=e.target.value.toLowerCase();state.reportPage=0;draw();const input=$('#reportSearch');input?.focus();input?.setSelectionRange(caret,caret)}); $('#typeFilter')?.addEventListener('change',e=>{state.type=e.target.value;state.reportPage=0;draw()}); $('#statusFilter')?.addEventListener('change',e=>{state.status=e.target.value;state.reportPage=0;draw()});
+  $('#locationFilter')?.addEventListener('input',e=>{const caret=e.target.selectionStart;state.loc=e.target.value.toLowerCase();state.reportPage=0;draw();const input=$('#locationFilter');input?.focus();input?.setSelectionRange(caret,caret)}); $('#categoryFilter')?.addEventListener('change',e=>{state.category=e.target.value;state.reportPage=0;draw()}); $('#dateFilter')?.addEventListener('change',e=>{state.reportDate=e.target.value;state.reportPage=0;draw()});
+  $('#reportsPrev')?.addEventListener('click',()=>{state.reportPage=Math.max(0,state.reportPage-1);draw()}); $('#reportsNext')?.addEventListener('click',()=>{state.reportPage++;draw()});
+  $('#userSearch')?.addEventListener('input',e=>{const caret=e.target.selectionStart;state.q=e.target.value.toLowerCase();draw();const input=$('#userSearch');input?.focus();input?.setSelectionRange(caret,caret)});
+  root.querySelectorAll('.status-edit').forEach(el=>el.onchange=()=>changeReport(el.dataset.id,el.value));
+  root.querySelectorAll('.flag-report').forEach(el=>el.onclick=()=>changeReport(el.dataset.id,'flagged'));
+  root.querySelectorAll('.claim-decision').forEach(el=>el.onclick=async()=>{const reason=el.dataset.decision==='Rejected'?prompt('Reason for rejecting this claim (required):'):'';if(el.dataset.decision==='Rejected'&&(!reason||reason.trim().length<3))return notify('Add a reason of at least 3 characters before rejecting.');if(!confirm(`${el.dataset.decision} this ownership claim?`))return;el.disabled=true;try{await decideOwnershipClaim(el.dataset.id,el.dataset.decision,reason||'');notify(`Claim ${el.dataset.decision.toLowerCase()}.`)}catch(e){notify(e.message);el.disabled=false}});
+  root.querySelectorAll('.coordinate-pickup').forEach(el=>el.onclick=async()=>{const details=prompt('Agreed pickup place and time:');if(!details?.trim())return;try{await coordinateClaimPickup(el.dataset.id,details);notify('Pickup details sent.')}catch(e){notify(e.message)}});
+  root.querySelectorAll('[data-notice]').forEach(el=>el.onclick=async()=>{try{await updateDoc(doc(db,'notifications',el.dataset.notice),{read:true})}catch(e){notify(e.message)}});
 }
-
-function claimCard(claim) {
-  const pending = claim.status === 'Pending';
-  const approved = claim.status === 'Approved';
-  const pickupStatus = claim.pickupStatus || 'Awaiting pickup coordination';
-  const decision = claim.decision || claim.status;
-  return `<article class="card admin-claim"><div class="admin-claim-photo">${claim.itemImage ? `<img src="${escape(claim.itemImage)}" alt="${escape(claim.itemName)}">` : '<span>Image unavailable</span>'}</div><div class="admin-claim-content"><div class="claim-row"><div><h3>${escape(claim.itemName || claim.item?.itemName || 'Found item')}</h3><span class="claim-meta">Found item/report ID: ${escape(claim.itemId)}<br>Claim ID: ${escape(claim.id)}${claim.matchId ? `<br>Match ID: ${escape(claim.matchId)}<br>Related lost report ID: ${escape(claim.lostReportId)}` : ''}</span></div><span class="claim-status ${escape(claim.status.toLowerCase())}">${escape(claim.status)}</span></div><p><b>Claimant:</b> ${escape(claim.claimantName || 'NexusFind user')} · ${escape(claim.claimantEmail || '')}<br><b>Claimant ID:</b> ${escape(claim.claimantId)}<br><b>Submitted:</b> ${escape(dateText(claim.createdAt))}</p><details class="admin-details"><summary>View details and ownership evidence</summary><div class="summary"><strong>ITEM DETAILS</strong>${escape(claim.item?.description || 'No public description available.')}<br>Location: ${escape(claim.item?.location || 'Not provided')}</div><div class="summary"><strong>OWNERSHIP EXPLANATION</strong>${escape(claim.reason)}</div><div class="summary"><strong>PRIVATE VERIFICATION DETAILS</strong>${escape(claim.evidence)}</div>${!pending ? `<div class="summary"><strong>ADMIN DECISION</strong>${escape(decision)} · ${escape(dateText(claim.decidedAt))}<br>Admin ID: ${escape(claim.decidedBy || 'Unavailable')}${claim.decisionReason ? `<br>Reason: ${escape(claim.decisionReason)}` : ''}</div>` : ''}${approved ? `<div class="summary"><strong>PICKUP COORDINATION</strong>${escape(pickupStatus)}${claim.pickupDetails ? `<br>${escape(claim.pickupDetails)}` : ''}${claim.pickupCoordinatedAt ? `<br>Updated: ${escape(dateText(claim.pickupCoordinatedAt))}` : ''}</div>` : ''}</details>${pending ? `<div class="admin-actions"><button class="button claim-decision" data-id="${escape(claim.id)}" data-decision="Approved" type="button">Approve</button><button class="small-button claim-decision reject" data-id="${escape(claim.id)}" data-decision="Rejected" type="button">Reject</button></div>` : ''}${approved && pickupStatus !== 'Recovered' ? `<button class="small-button coordinate-pickup" data-id="${escape(claim.id)}" type="button">${pickupStatus === 'Coordinated' ? 'Update pickup details' : 'Coordinate pickup'}</button>` : ''}${approved && pickupStatus === 'Recovered' ? '<p class="claim-status approved">Item recovered</p>' : ''}</div></article>`;
-}
-
-function renderClaims(claims) {
-  renderSummary(claims);
-  const sorted = claims.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
-  const pending = sorted.filter((claim) => claim.status === 'Pending');
-  const history = sorted.filter((claim) => claim.status !== 'Pending');
-  claimsRoot.innerHTML = `<section class="admin-claim-group"><h3>Pending review</h3>${pending.length ? pending.map(claimCard).join('') : '<p class="subtitle admin-empty">No pending claims need review.</p>'}</section>${history.length ? `<section class="admin-claim-group"><h3>Decisions and pickup</h3>${history.map(claimCard).join('')}</section>` : ''}`;
-  claimsRoot.querySelectorAll('.claim-decision').forEach((button) => button.onclick = async () => {
-    const decision = button.dataset.decision;
-    const reason = decision === 'Rejected' ? (window.prompt('Optional rejection reason for the claimant:') || '') : '';
-    if (!window.confirm(`${decision} this claim? ${decision === 'Approved' ? 'The item will be reserved for the claimant.' : 'The claimant will receive the rejection decision.'}`)) return;
-    button.disabled = true;
-    try { await decideOwnershipClaim(button.dataset.id, decision, reason); message.textContent = `Claim ${decision.toLowerCase()} and saved.`; }
-    catch (error) { showError(error); button.disabled = false; }
-  });
-  claimsRoot.querySelectorAll('.coordinate-pickup').forEach((button) => button.onclick = async () => {
-    const details = window.prompt('Enter the agreed pickup place and time:');
-    if (!details?.trim()) return;
-    if (!window.confirm('Save and send these pickup coordination details to the claimant?')) return;
-    button.disabled = true;
-    try { await coordinateClaimPickup(button.dataset.id, details); message.textContent = 'Pickup details sent to the claimant.'; }
-    catch (error) { showError(error); button.disabled = false; }
-  });
-}
-
-function renderInbox(entries) {
-  inboxRoot.innerHTML = entries.length ? `<h2>Admin notifications</h2>${entries.map((entry) => `<button class="notification ${entry.read ? 'read' : ''}" data-notice="${escape(entry.id)}" type="button"><span class="notice-copy"><b>${escape(entry.title)}</b><p>${escape(entry.message)}</p></span><time class="notice-time">${entry.read ? 'Read' : 'Unread'}</time></button>`).join('')}` : '';
-  inboxRoot.querySelectorAll('[data-notice]').forEach((button) => button.onclick = async () => { try { await updateDoc(doc(db, 'notifications', button.dataset.notice), { read: true }); } catch (error) { showError(error); } });
-}
-
-function setTheme() { document.body.dataset.theme = document.body.dataset.theme === 'light' ? '' : 'light'; localStorage.nexusTheme = document.body.dataset.theme || 'dark'; }
-document.querySelector('#adminTheme').onclick = setTheme;
-document.querySelector('#adminThemeMobile').onclick = setTheme;
-
-onAuthStateChanged(auth, async (user) => {
-  clear(); summaryRoot.replaceChildren(); inboxRoot.replaceChildren();
-  claimsRoot.innerHTML = '<div class="admin-loading">Loading claims…</div>';
-  if (!user) { message.textContent = 'Sign in on the main NexusFind page with your administrator account.'; claimsRoot.replaceChildren(); return; }
-  try {
-    const admin = await getDoc(doc(db, 'admins', user.uid));
-    if (!admin.exists()) { message.textContent = 'This account is not authorized to access Admin Verification.'; claimsRoot.replaceChildren(); return; }
-    message.textContent = 'Administrator access confirmed.';
-    stopClaims = onSnapshot(collection(db, 'claims'), async (snapshot) => {
-      message.textContent = 'Loading current Firebase claims…';
-      try {
-        const claims = await Promise.all(snapshot.docs.map(async (entry) => {
-          const claim = { id: entry.id, ...entry.data() };
-          try { const item = await getDoc(doc(db, 'items', claim.itemId)); claim.item = item.exists() ? item.data() : null; claim.itemImage = claim.item?.imageUrl || ''; } catch { claim.item = null; claim.itemImage = ''; }
-          return claim;
-        }));
-        renderClaims(claims);
-        message.textContent = 'Claims are live from Firebase. Updates appear automatically.';
-      } catch (error) { showError(error); }
-    }, showError);
-    stopInbox = onSnapshot(query(collection(db, 'notifications'), where('audience', '==', 'admins')), (snapshot) => {
-      renderInbox(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })).sort((a,b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)));
-    }, showError);
-  } catch (error) { claimsRoot.replaceChildren(); showError(error); }
-});
-
-const doSignOut = async () => { try { await signOut(auth); location.href = 'index.html'; } catch (error) { showError(error); } };
-document.querySelector('#adminLogout').onclick = doSignOut;
-document.querySelector('#adminLogoutMobile').onclick = doSignOut;
-window.addEventListener('pagehide', clear);
+function navigate(page){state.page=page;document.querySelectorAll('.admin-nav [data-page]').forEach(x=>x.classList.toggle('active',x.dataset.page===page));draw()}
+async function changeReport(id,status){if(!status)return;const item=state.items.find(x=>x.id===id);if(!item)return;if(!confirm(`Set “${item.itemName||'this report'}” to ${status}?`)){draw();return}try{const batch=writeBatch(db), itemRef=doc(db,'items',id), noticeId=`admin_report_${id}_${status}`, noticeRef=doc(db,'notifications',noticeId), auditRef=doc(collection(db,'adminAudit'));batch.update(itemRef,{status,updatedAt:serverTimestamp()});if(!(await getDoc(noticeRef)).exists())batch.set(noticeRef,{type:'report_status',title:`Report ${status}`,message:`Your report “${item.itemName||'item'}” was marked ${status}.`,userId:item.userId,itemId:id,read:false,createdAt:serverTimestamp()});batch.set(auditRef,{actorUid:auth.currentUser.uid,action:'report_status',targetId:id,from:item.status||item.type,to:status,outcome:'success',createdAt:serverTimestamp()});await batch.commit();notify('Report updated and owner notified.')}catch(e){notify(e.message);tell(e.message,true)}}
+function watch(path,cb,queryFn=(c)=>c){stops.push(onSnapshot(queryFn(collection(db,path)),s=>{cb(s.docs.map(d=>({id:d.id,...d.data()})));draw()},e=>tell(`Could not load ${path}: ${e.message}`,true)))}
+function cleanup(){stops.forEach(s=>s());stops=[]}
+$('#adminTheme').onclick=()=>{document.body.dataset.theme=document.body.dataset.theme==='light'?'':'light';localStorage.nexusTheme=document.body.dataset.theme||'dark'}; $('#adminThemeMobile').onclick=$('#adminTheme').onclick;
+document.querySelectorAll('.admin-nav [data-page]').forEach(el=>el.onclick=()=>navigate(el.dataset.page));
+$('#adminLogout').onclick=$('#adminLogoutMobile').onclick=async()=>{await signOut(auth);location.href='index.html'};
+onAuthStateChanged(auth,async user=>{cleanup();root.innerHTML='<p class="admin-loading">Checking administrator access…</p>';if(!user){tell('Sign in on NexusFind first.');return}try{const token=await getIdTokenResult(user,true);if(token.claims.admin!==true){tell('This account is not authorized for Admin Verification.',true);root.innerHTML='';return}tell('Administrator access confirmed · live Firebase data');watch('items',v=>state.items=v);watch('claims',v=>state.claims=v);watch('users',v=>state.users=v,c=>query(c));watch('notifications',v=>state.notices=v,c=>query(c,where('audience','==','admins')));watch('adminAudit',v=>state.logs=v);draw()}catch(e){tell(e.message,true);root.innerHTML=''}});
+window.addEventListener('pagehide',cleanup);
