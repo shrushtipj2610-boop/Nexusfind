@@ -1,6 +1,5 @@
-import { createItemReport, getItemReport, markNotificationRead, watchItemReports, watchNotifications, watchMatchesForUser, getMatchDetails, updateMatchStatus, submitOwnershipClaim, watchClaimsForUser, confirmClaimReceived } from './database.js';
-import { getCurrentUser, logout, signIn, signUp, sendPasswordReset, watchAuthentication } from './auth.js';
-import { getIdTokenResult } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
+import { createItemReport, getItemReport, markNotificationRead, watchItemReports, watchNotifications, watchMatchesForUser, getMatchDetails, updateMatchStatus, submitOwnershipClaim, watchClaimsForUser } from './database.js';
+import { getCurrentUser, getCurrentUserRole, logout, signIn, signUp, sendPasswordReset, watchAuthentication } from './auth.js';
 
 const authRoot = document.querySelector('#auth-root');
 const appShell = document.querySelector('#app-shell');
@@ -96,14 +95,33 @@ async function showDashboard() {
   // authenticated Firestore inbox returns its real unread count.
   document.querySelectorAll('.notify-link em, .notify-link i b').forEach((badge) => { badge.hidden = true; });
   document.querySelector('#logoutButton').disabled = false;
-  const adminNav = document.querySelector('#adminNav');
-  if (adminNav && getCurrentUser()?.uid) {
-    adminNav.hidden = true;
-    try { adminNav.hidden = (await getIdTokenResult(getCurrentUser(), true)).claims.admin !== true; }
-    catch (error) { console.warn('Admin navigation access check failed:', error); }
+  const user = getCurrentUser();
+  const accountInfo = document.querySelector('#accountInfo');
+  const accountEmail = document.querySelector('#accountEmail');
+  const accountRole = document.querySelector('#accountRole');
+  const adminNavGroup = document.querySelector('#adminNavGroup');
+  if (accountInfo && accountEmail && accountRole) {
+    accountInfo.hidden = !user;
+    accountEmail.textContent = user?.email || 'Email unavailable';
+    accountRole.textContent = user ? 'Checking role…' : 'SIGNED OUT';
+    accountRole.dataset.role = 'loading';
+  }
+  if (adminNavGroup) adminNavGroup.hidden = true;
+  if (user?.uid) {
+    try {
+      const { isAdmin } = await getCurrentUserRole(user);
+      if (accountRole) {
+        accountRole.textContent = isAdmin ? 'ADMIN' : 'STUDENT';
+        accountRole.dataset.role = isAdmin ? 'admin' : 'student';
+      }
+      if (adminNavGroup) adminNavGroup.hidden = !isAdmin;
+    } catch (error) {
+      if (accountRole) { accountRole.textContent = 'ROLE UNAVAILABLE'; accountRole.dataset.role = 'unavailable'; }
+      console.warn('Admin navigation access check failed; admin links remain hidden:', error);
+    }
   }
   if (!dashboardLoaded) {
-    window.NexusFind = { createItemReport, getItemReport, markNotificationRead, watchItemReports, watchNotifications, watchMatchesForUser, getMatchDetails, updateMatchStatus, submitOwnershipClaim, watchClaimsForUser, confirmClaimReceived, currentUser: getCurrentUser, applyLogoTheme };
+    window.NexusFind = { createItemReport, getItemReport, markNotificationRead, watchItemReports, watchNotifications, watchMatchesForUser, getMatchDetails, updateMatchStatus, submitOwnershipClaim, watchClaimsForUser, currentUser: getCurrentUser, applyLogoTheme };
     await import('./script.js');
     dashboardLoaded = true;
   }
@@ -111,7 +129,12 @@ async function showDashboard() {
 
 watchAuthentication((user, error) => {
   if (user) showDashboard();
-  else { appShell.hidden = true; authRoot.hidden = false; document.querySelector('#adminNav').hidden = true; if (!document.querySelector('#login-form')) renderCreateAccount(error?.message || ''); applyLogoTheme(); }
+  else {
+    appShell.hidden = true; authRoot.hidden = false;
+    const adminNavGroup = document.querySelector('#adminNavGroup'); if (adminNavGroup) adminNavGroup.hidden = true;
+    const accountInfo = document.querySelector('#accountInfo'); if (accountInfo) accountInfo.hidden = true;
+    if (!document.querySelector('#login-form')) renderCreateAccount(error?.message || ''); applyLogoTheme();
+  }
 });
 
 document.querySelector('#logoutButton').addEventListener('click', async () => {
