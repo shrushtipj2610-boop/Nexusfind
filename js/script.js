@@ -44,11 +44,29 @@ function releaseImagePreview(file) {
   if (url) URL.revokeObjectURL(url);
   imagePreviewUrls.delete(file);
 }
-function bindImagePreview(input, preview, getFile, setFile) {
+function bindImagePreview(input, preview, getFile, setFile, getDefaultReport = () => ({})) {
   const render = () => {
     const file = getFile();
     preview.replaceChildren();
-    if (!file) return;
+    if (!file) {
+      const match = getReportImage(getDefaultReport());
+      if (!match) {
+        const empty = document.createElement('span');
+        empty.className = 'image-placeholder';
+        empty.textContent = 'No image available';
+        preview.append(empty);
+        return render;
+      }
+      const image = document.createElement('img');
+      image.src = match;
+      image.alt = 'Suggested image for this report';
+      image.onerror = () => { preview.replaceChildren(); const unavailable = document.createElement('span'); unavailable.className = 'image-placeholder'; unavailable.textContent = 'Image unavailable'; preview.append(unavailable); };
+      const label = document.createElement('small');
+      label.className = 'default-image-label';
+      label.textContent = 'Suggested project image · upload a photo to replace it';
+      preview.append(image, label);
+      return render;
+    }
     let url = imagePreviewUrls.get(file);
     if (!url) { url = URL.createObjectURL(file); imagePreviewUrls.set(file, url); }
     const image = document.createElement('img');
@@ -65,6 +83,7 @@ function bindImagePreview(input, preview, getFile, setFile) {
       render();
     };
     preview.append(image, remove);
+    return render;
   };
   input.onchange = () => {
     const file = input.files?.[0] || null;
@@ -84,6 +103,7 @@ function bindImagePreview(input, preview, getFile, setFile) {
     render();
   };
   render();
+  return render;
 }
 const persistedItemCard = (report) => {
   const type = report.type === 'found' ? 'found' : 'lost';
@@ -232,7 +252,7 @@ let lostDraft = {};
 function renderLostStep(step) {
   const form = $('#lostForm');
   const fields = step === 1
-    ? `<div class="form-grid"><div class="field wide"><label>Item Name</label><input class="input" id="lostItemName" value="${escapeHtml(lostDraft.itemName || '')}" placeholder="e.g. Earphones, Keys, Wallet..." required></div><div class="field wide"><label>Category</label><select id="lostCategory" required><option value="">Select category</option><option>Electronics</option><option>Keys</option><option>Bags & Backpacks</option><option>ID Cards</option><option>Personal Items</option></select></div><div class="field wide"><label>Description</label><textarea id="lostDescription" placeholder="Describe distinguishing features..." required>${escapeHtml(lostDraft.description || '')}</textarea></div><div class="field wide"><label>Identifying details</label><input class="input" id="lostIdentifying" value="${escapeHtml(lostDraft.identifyingDetails || '')}" placeholder="Color, brand, sticker, scratches..."></div><div class="field wide"><label>Predefined image (optional)</label><select class="input" id="lostPredefinedImage"><option value="">Choose a project image</option><option value="/images/powerbank_mobile.png">Power bank</option><option value="/images/keys.jpeg">Keys</option><option value="/images/bottle.jpeg">Bottle</option><option value="/images/charger%20laptop.png">Laptop charger</option><option value="/images/airpods.jpeg">AirPods</option><option value="/images/earbuds.jpeg">Earbuds</option><option value="/images/document.jpeg">Document</option><option value="/images/collegeid.png">College ID</option></select><label>Or upload an image (optional)</label><input class="input" id="lostImage" type="file" accept="image/jpeg,image/png,image/webp"><div class="image-preview" id="lostImagePreview"></div><small class="subtitle">JPG, JPEG, PNG or WEBP, up to 5MB.</small></div><div class="field wide"><label>Reward (Optional)</label><input class="input" id="lostReward" value="${escapeHtml(lostDraft.reward || '')}" placeholder="e.g. ₹500"></div></div>`
+    ? `<div class="form-grid"><div class="field wide"><label>Item Name</label><input class="input" id="lostItemName" value="${escapeHtml(lostDraft.itemName || '')}" placeholder="e.g. Earphones, Keys, Wallet..." required></div><div class="field wide"><label>Category</label><select id="lostCategory" required><option value="">Select category</option><option>Electronics</option><option>Keys</option><option>Bags & Backpacks</option><option>ID Cards</option><option>Personal Items</option></select></div><div class="field wide"><label>Description</label><textarea id="lostDescription" placeholder="Describe distinguishing features..." required>${escapeHtml(lostDraft.description || '')}</textarea></div><div class="field wide"><label>Identifying details</label><input class="input" id="lostIdentifying" value="${escapeHtml(lostDraft.identifyingDetails || '')}" placeholder="Color, brand, sticker, scratches..."></div><div class="field wide"><label>Upload a photograph (optional)</label><input class="input" id="lostImage" type="file" accept="image/jpeg,image/png,image/webp"><div class="image-preview" id="lostImagePreview"></div><small class="subtitle">JPG, JPEG, PNG or WEBP, up to 5MB.</small></div><div class="field wide"><label>Reward (Optional)</label><input class="input" id="lostReward" value="${escapeHtml(lostDraft.reward || '')}" placeholder="e.g. ₹500"></div></div>`
     : step === 2
       ? `<div class="form-grid"><div class="field wide"><label>Last Seen Location</label><select id="lostLocation" required><option value="">Select location</option><option>Library</option><option>Canteen</option><option>Classroom</option><option>Parking Area</option><option>Computer Lab</option></select></div><div class="field wide"><label>Specific Landmark / Area</label><input class="input" id="lostLandmark" value="${escapeHtml(lostDraft.landmark || '')}" placeholder="e.g. Near window seat, 2nd floor..."></div><div class="field"><label>Date Lost</label><input type="date" class="input" id="lostDate" value="${escapeHtml(lostDraft.dateLost || '')}" required></div><div class="field"><label>Approximate time</label><input type="time" class="input" id="lostTime" value="${escapeHtml(lostDraft.approximateTime || '')}"></div><div class="hint">💡 &nbsp; The more precise your location, the higher the chance of a match.</div></div>`
       : `<div class="form-grid"><div class="summary"><strong>REPORT SUMMARY</strong>Item: ${escapeHtml(lostDraft.itemName || '—')}<br>Category: ${escapeHtml(lostDraft.category || '—')}<br>Location: ${escapeHtml(lostDraft.location || '—')}<br>Date: ${escapeHtml(lostDraft.dateLost || '—')}</div><p class="subtitle wide">Your account will be used as the report owner. Contact details remain private.</p></div>`;
@@ -244,11 +264,9 @@ function renderLostStep(step) {
   }
   if (step === 2) $('#lostLocation').value = lostDraft.location || '';
   if (step === 1) {
-    const lostInput = $('#lostImage'), lostPreview = $('#lostImagePreview'), predefined = $('#lostPredefinedImage');
-    bindImagePreview(lostInput, lostPreview, () => lostDraft.imageFile || null, (file) => { lostDraft.imageFile = file; });
-    predefined.value = lostDraft.imageUrl || '';
-    predefined.onchange = () => { lostDraft.imageUrl = predefined.value; if (predefined.value) { lostDraft.imageFile = null; lostInput.value = ''; lostPreview.innerHTML = `<img src="${escapeHtml(predefined.value)}" alt="Selected project image preview">`; } else lostPreview.replaceChildren(); };
-    lostInput.addEventListener('change', () => { if (lostInput.files?.length) { predefined.value = ''; lostDraft.imageUrl = ''; } });
+    const lostInput = $('#lostImage'), lostPreview = $('#lostImagePreview');
+    const updateLostPreview = bindImagePreview(lostInput, lostPreview, () => lostDraft.imageFile || null, (file) => { lostDraft.imageFile = file; }, () => ({ itemName: $('#lostItemName').value, category: $('#lostCategory').value, color: $('#lostColor').value, description: $('#lostDescription').value, identifyingDetails: $('#lostIdentifying').value }));
+    ['input', 'change'].forEach((eventName) => [$('#lostItemName'), $('#lostCategory'), $('#lostColor'), $('#lostDescription'), $('#lostIdentifying')].forEach((field) => field.addEventListener(eventName, updateLostPreview)));
   }
   [...document.querySelectorAll('.progress-step')].forEach((el, i) => { el.classList.toggle('active', i === step - 1); el.classList.toggle('done', i < step - 1); el.querySelector('.progress-dot').textContent = i < step - 1 ? '✓' : i + 1; });
   [...document.querySelectorAll('.progress-line')].forEach((el, i) => el.classList.toggle('done', i < step - 1));
@@ -282,14 +300,13 @@ function renderLostStep(step) {
 
 function found() {
   let foundImageFile = null;
-  root.innerHTML = shell(`${reportHeader('found')}<form class="form-card" id="foundForm"><div class="form-grid"><div class="field"><label>Item Name</label><input class="input" id="foundItemName" placeholder="e.g. Silver water bottle" required></div><div class="field"><label>Category</label><select id="foundCategory" required><option value="">Select category</option><option>Electronics</option><option>Keys</option><option>Bags & Backpacks</option><option>ID Cards</option><option>Personal Items</option></select></div><div class="field wide"><label>Description</label><textarea id="foundDescription" placeholder="Describe distinguishing features..." required></textarea></div><div class="field wide"><label>Identifying details</label><input class="input" id="foundIdentifying" placeholder="Color, brand, sticker, scratches..."></div><div class="field wide"><label>Predefined image (optional)</label><select class="input" id="foundPredefinedImage"><option value="">Choose a project image</option><option value="/images/powerbank_mobile.png">Power bank</option><option value="/images/keys.jpeg">Keys</option><option value="/images/bottle.jpeg">Bottle</option><option value="/images/charger%20laptop.png">Laptop charger</option><option value="/images/airpods.jpeg">AirPods</option><option value="/images/earbuds.jpeg">Earbuds</option><option value="/images/document.jpeg">Document</option><option value="/images/collegeid.png">College ID</option></select><label>Or upload an image (optional)</label><input class="input" id="foundImage" type="file" accept="image/jpeg,image/png,image/webp"><div class="image-preview" id="foundImagePreview"></div><small class="subtitle">JPG, JPEG, PNG or WEBP, up to 5MB.</small></div><div class="field"><label>Location Found</label><input class="input" id="foundLocation" placeholder="e.g. Cafeteria" required></div><div class="field"><label>Date Found</label><input type="date" class="input" id="foundDate" required></div><div class="field"><label>Approximate time</label><input type="time" class="input" id="foundTime"></div><div class="field wide"><label>Current Storage Location</label><input class="input" id="foundStorage" placeholder="e.g. Security desk, Block A"></div></div><p class="submit-error" id="foundSubmitError" role="alert" aria-live="polite"></p><div class="form-actions"><span></span><button class="button" type="submit">Submit found item</button></div></form>`, 'form-page');
+  root.innerHTML = shell(`${reportHeader('found')}<form class="form-card" id="foundForm"><div class="form-grid"><div class="field"><label>Item Name</label><input class="input" id="foundItemName" placeholder="e.g. Silver water bottle" required></div><div class="field"><label>Category</label><select id="foundCategory" required><option value="">Select category</option><option>Electronics</option><option>Keys</option><option>Bags & Backpacks</option><option>ID Cards</option><option>Personal Items</option></select></div><div class="field wide"><label>Description</label><textarea id="foundDescription" placeholder="Describe distinguishing features..." required></textarea></div><div class="field wide"><label>Identifying details</label><input class="input" id="foundIdentifying" placeholder="Color, brand, sticker, scratches..."></div><div class="field wide"><label>Upload a photograph (optional)</label><input class="input" id="foundImage" type="file" accept="image/jpeg,image/png,image/webp"><div class="image-preview" id="foundImagePreview"></div><small class="subtitle">JPG, JPEG, PNG or WEBP, up to 5MB.</small></div><div class="field"><label>Location Found</label><input class="input" id="foundLocation" placeholder="e.g. Cafeteria" required></div><div class="field"><label>Date Found</label><input type="date" class="input" id="foundDate" required></div><div class="field"><label>Approximate time</label><input type="time" class="input" id="foundTime"></div><div class="field wide"><label>Current Storage Location</label><input class="input" id="foundStorage" placeholder="e.g. Security desk, Block A"></div></div><p class="submit-error" id="foundSubmitError" role="alert" aria-live="polite"></p><div class="form-actions"><span></span><button class="button" type="submit">Submit found item</button></div></form>`, 'form-page');
   const form = $('#foundForm');
   $('#foundCategory').closest('.field').insertAdjacentHTML('afterend', '<div class="field"><label>Color (optional)</label><input class="input" id="foundColor" placeholder="e.g. Black"></div>');
   $('#foundIdentifying').placeholder = 'Private verification details';
-  const foundInput = $('#foundImage'), foundPreview = $('#foundImagePreview'), foundPredefined = $('#foundPredefinedImage');
-  bindImagePreview(foundInput, foundPreview, () => foundImageFile, (file) => { foundImageFile = file; });
-  foundPredefined.onchange = () => { if (foundPredefined.value) { foundImageFile = null; foundInput.value = ''; foundPreview.innerHTML = `<img src="${escapeHtml(foundPredefined.value)}" alt="Selected project image preview">`; } else foundPreview.replaceChildren(); };
-  foundInput.addEventListener('change', () => { if (foundInput.files?.length) foundPredefined.value = ''; });
+  const foundInput = $('#foundImage'), foundPreview = $('#foundImagePreview');
+  const updateFoundPreview = bindImagePreview(foundInput, foundPreview, () => foundImageFile, (file) => { foundImageFile = file; }, () => ({ itemName: $('#foundItemName').value, category: $('#foundCategory').value, color: $('#foundColor').value, description: $('#foundDescription').value, identifyingDetails: $('#foundIdentifying').value }));
+  ['input', 'change'].forEach((eventName) => [$('#foundItemName'), $('#foundCategory'), $('#foundColor'), $('#foundDescription'), $('#foundIdentifying')].forEach((field) => field.addEventListener(eventName, updateFoundPreview)));
   form.onsubmit = async (event) => {
     event.preventDefault();
     if (!form.checkValidity()) { form.reportValidity(); return; }
@@ -299,7 +316,7 @@ function found() {
     submitButton.textContent = 'Submitting...';
     try {
       console.info('[REPORT] Submit started');
-      const result = await window.NexusFind.createItemReport({ type: 'found', itemName: $('#foundItemName').value, category: $('#foundCategory').value, color: $('#foundColor').value, description: $('#foundDescription').value, identifyingDetails: $('#foundIdentifying').value, imageFile: foundImageFile, imageUrl: foundPredefined.value, location: $('#foundLocation').value, dateFound: $('#foundDate').value, approximateTime: $('#foundTime').value, storageLocation: $('#foundStorage').value });
+      const result = await window.NexusFind.createItemReport({ type: 'found', itemName: $('#foundItemName').value, category: $('#foundCategory').value, color: $('#foundColor').value, description: $('#foundDescription').value, identifyingDetails: $('#foundIdentifying').value, imageFile: foundImageFile, location: $('#foundLocation').value, dateFound: $('#foundDate').value, approximateTime: $('#foundTime').value, storageLocation: $('#foundStorage').value });
       console.info('[REPORT] Submission completed:', result.id);
       toast('Thank you for reporting this found item!');
       releaseImagePreview(foundImageFile);

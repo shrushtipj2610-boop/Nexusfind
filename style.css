@@ -27,22 +27,91 @@ button.notification{width:100%;color:var(--text);font:inherit;text-align:left;cu
 #adminNav[hidden]{display:none}.my-claim-card{display:grid;grid-template-columns:minmax(150px,220px) minmax(0,1fr);overflow:hidden}.my-claim-photo{min-height:190px;display:grid;place-items:center;background:var(--surface-2);color:var(--muted)}.my-claim-photo img{width:100%;height:100%;min-height:190px;max-height:280px;object-fit:cover}.my-claim-copy{padding:20px;min-width:0}.my-claim-copy .claim-row{padding:0;align-items:flex-start}.my-claim-copy h2{margin:0;font-size:19px}.my-claim-copy p{color:var(--muted);line-height:1.5;overflow-wrap:anywhere}.claim-decision-copy{margin-top:12px;padding:14px 16px;border:1px solid var(--line);border-radius:13px;background:rgba(15,16,35,.18);line-height:1.6;overflow-wrap:anywhere}.claim-empty{padding:24px;border:1px dashed var(--line);border-radius:16px}.admin-nav{display:none}
 @media(max-width:720px){.my-claim-card{grid-template-columns:1fr}.my-claim-photo,.my-claim-photo img{min-height:170px;max-height:230px}.my-claim-copy{padding:17px}}
 
-/* My Claims stays within the NexusFind lavender palette with readable light cards. */
-.page.my-claims-page{max-width:none;min-height:100vh;margin:0;background:#f6f5fc;color:#202237}
-.page.my-claims-page .page-title,.page.my-claims-page h2,.page.my-claims-page h3,.page.my-claims-page .my-claim-copy{color:#202237}
-.page.my-claims-page .subtitle,.page.my-claims-page .my-claim-copy p{color:#5e637b}
-.page.my-claims-page .my-claim-card{background:#fff;border:1px solid #e2def3;color:#202237;box-shadow:0 10px 28px rgba(63,48,130,.08)}
-.page.my-claims-page .my-claim-photo{background:#efedfa;color:#5e637b}
-.page.my-claims-page .claim-decision-copy,.page.my-claims-page .item-found-location{background:#f4f1ff;border:1px solid #d9d1ff;color:#292744}
-.page.my-claims-page .claim-decision-copy b,.page.my-claims-page .item-found-location b{color:#30266f}
+/* My Claims inherits the active theme and keeps its lavender decision panels. */
+.page.my-claims-page{max-width:none;min-height:100vh;margin:0;background:var(--bg);color:var(--text)}
+.page.my-claims-page .page-title,.page.my-claims-page h2,.page.my-claims-page h3,.page.my-claims-page .my-claim-copy{color:var(--text)}
+.page.my-claims-page .subtitle,.page.my-claims-page .my-claim-copy p{color:var(--muted)}
+.page.my-claims-page .my-claim-card{background:var(--surface);border:1px solid var(--line);color:var(--text);box-shadow:0 10px 28px var(--shadow)}
+.page.my-claims-page .my-claim-photo{background:var(--surface-2);color:var(--muted)}
+.page.my-claims-page .claim-decision-copy,.page.my-claims-page .item-found-location{background:var(--surface-2);border:1px solid var(--line);color:var(--text)}
+.page.my-claims-page .claim-decision-copy b,.page.my-claims-page .item-found-location b{color:var(--text)}
 .page.my-claims-page .item-found-location{margin-top:12px;padding:14px 16px;border-radius:13px;line-height:1.6;overflow-wrap:anywhere}
-.page.my-claims-page .item-found-location p{margin:7px 0 0;color:#24243b;font-weight:650}
-.page.my-claims-page .claim-status.approved,.page.my-claims-page .claim-status.collected{color:#176a49;background:#e7f7ef;border-color:#9ad7b7}
-.page.my-claims-page .claim-status.pending{color:#775500;background:#fff5d9;border-color:#edcf73}
-.page.my-claims-page .claim-status.rejected{color:#9d2633;background:#feeaec;border-color:#efa6ad}
-.page.my-claims-page .claim-empty{border-color:#cbc5e7;color:#5e637b}
+.page.my-claims-page .item-found-location p{margin:7px 0 0;color:var(--text);font-weight:650}
+.page.my-claims-page .claim-status.approved,.page.my-claims-page .claim-status.collected{color:#69e0b3;background:rgba(32,213,186,.12);border-color:rgba(32,213,186,.4)}
+.page.my-claims-page .claim-status.pending{color:#ffd166;background:rgba(255,198,43,.12);border-color:rgba(255,198,43,.4)}
+.page.my-claims-page .claim-status.rejected{color:#ff929a;background:rgba(255,78,91,.1);border-color:rgba(255,78,91,.4)}
+.page.my-claims-page .claim-empty{border-color:var(--line);color:var(--muted)}
 
 .claim-list,.admin-claims{display:grid;gap:16px}.claim-row{display:flex;justify-content:space-between;align-items:center;gap:18px;padding:20px 24px}.claim-row h2,.admin-claim h2{margin:0;font-size:19px}.claim-row p,.claim-meta{color:var(--muted);font-size:14px}.claim-status{display:inline-flex;align-items:center;border-radius:999px;padding:7px 12px;font-size:13px;font-weight:750;text-transform:capitalize;white-space:nowrap}.claim-status.pending{color:#d7b24a;background:rgba(255,198,43,.12);border:1px solid rgba(255,198,43,.4)}.claim-status.approved{color:#13b99c;background:rgba(32,213,186,.12);border:1px solid rgba(32,213,186,.4)}.claim-status.rejected{color:#ff7b85;background:rgba(255,78,91,.1);border:1px solid rgba(255,78,91,.4)}.claim-item{display:block;margin-top:10px}.admin-page{max-width:1050px}.admin-heading{margin-top:24px;align-items:center}.admin-heading .subtitle{margin-bottom:0}.admin-claim{display:grid;grid-template-columns:minmax(180px,280px) 1fr;overflow:hidden}.admin-claim-photo{min-height:220px;display:grid;place-items:center;background:var(--surface-2);color:var(--muted)}.admin-claim-photo img{width:100%;height:100%;min-height:220px;max-height:340px;object-fit:cover}.admin-claim-content{padding:24px;min-width:0}.admin-claim-content>p{line-height:1.6;color:var(--muted);overflow-wrap:anywhere}.admin-claim-content .summary{margin:12px 0;white-space:pre-wrap;overflow-wrap:anywhere}.admin-actions{display:flex;gap:12px;margin-top:18px}.admin-actions .button,.admin-actions .small-button{width:auto}.admin-actions .reject{color:#ff8791;border-color:rgba(255,78,91,.5)}.admin-empty{padding:28px;border:1px dashed var(--line);border-radius:16px}.admin-body{min-height:100vh;background:radial-gradient(circle at 50% 12%,var(--shadow),transparent 35%),var(--bg)}#adminInbox:empty{display:none}#adminInbox h2{font-size:18px}
 @media(max-width:720px){.claim-row{align-items:flex-start;padding:17px;flex-wrap:wrap}.admin-heading{display:flex;gap:10px;align-items:flex-start}.admin-claim{grid-template-columns:1fr}.admin-claim-photo,.admin-claim-photo img{min-height:190px;max-height:250px}.admin-claim-content{padding:18px}.admin-actions{display:grid;grid-template-columns:1fr}.admin-actions .button,.admin-actions .small-button{width:100%}}
 
 .account-info{display:grid;gap:5px;min-width:0;padding:12px;border:1px solid rgba(116,89,245,.42);border-radius:12px;background:linear-gradient(135deg,rgba(73,57,154,.24),rgba(32,29,67,.46))}.account-info>span{color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.12em}.account-info>strong{color:var(--text);font-size:13px;line-height:1.35;overflow-wrap:anywhere}.account-role{display:inline-block;width:max-content;padding:3px 8px;border:1px solid rgba(137,119,255,.4);border-radius:999px;background:rgba(104,86,220,.19);color:#b9b0ff;font-size:10px;font-weight:800;letter-spacing:.08em}.account-role[data-role=student]{border-color:rgba(89,198,165,.36);background:rgba(48,149,122,.14);color:#8fe0c4}.account-role[data-role=unavailable]{border-color:rgba(255,112,125,.4);color:#ff99a2}#accountInfo[hidden],#adminAccountInfo[hidden],#adminMobileAccount[hidden],#adminNavGroup[hidden],#adminNav[hidden]{display:none!important}.admin-nav-group{display:grid}.admin-nav-group .nav-link{width:100%;margin-left:0}
+
+/* Readable controls and focus states in both theme modes. */
+.field label,.auth-card .field label{color:var(--text)}
+.input:focus,select:focus,textarea:focus,.search:focus-within,.button:focus-visible,.small-button:focus-visible,.theme-button:focus-visible,.tab:focus-visible,.auth-role:focus-visible,.auth-switch:focus-visible{outline:2px solid #9b8cff;outline-offset:2px}
+input[type=checkbox],input[type=radio]{accent-color:var(--primary)}
+select option{color:var(--text);background:var(--surface)}
+.default-image-label{color:var(--muted);font-size:13px}
+body:not([data-theme="light"]) .sidebar-bottom a{color:#b2bad1}
+body:not([data-theme="light"]) .field label,body:not([data-theme="light"]) .auth-card .field label{color:#f0f1fb}
+body:not([data-theme="light"]) .claim-status.pending{color:#ffd166}
+body:not([data-theme="light"]) .claim-status.approved{color:#69e0b3}
+body:not([data-theme="light"]) .claim-status.rejected{color:#ff929a}
+
+[data-theme="light"]{color-scheme:light;--bg:#f6f5fc;--surface:#fff;--surface-2:#eeecf8;--input:#fff;--line:#d8d7e6;--text:#202237;--muted:#5e657d;--shadow:rgba(78,63,160,.1)}
+[data-theme="light"] body{background:var(--bg);color:var(--text)}
+[data-theme="light"] .card,[data-theme="light"] .step-card,[data-theme="light"] .form-card,[data-theme="light"] .filters,[data-theme="light"] .match-score-panel,[data-theme="light"] .match-report,[data-theme="light"] .match-card{background:#fff;color:#202237;border-color:#d8d7e6}
+[data-theme="light"] .sidebar{background:#fff;border-color:#e0deeb}
+[data-theme="light"] .nav-link{color:#555c73}
+[data-theme="light"] .nav-link.active{color:#4b3db1;background:#efedff;border-left-color:#6959dc}
+[data-theme="light"] .sidebar-bottom a{color:#515973}
+[data-theme="light"] .theme-button{color:#4e5369;background:#f6f5fc}
+[data-theme="light"] .field label,[data-theme="light"] .auth-card .field label,[data-theme="light"] .auth-role-label{color:#33364d}
+[data-theme="light"] .input,[data-theme="light"] select,[data-theme="light"] textarea{background:#fff;color:#202237;border-color:#b9bbce}
+[data-theme="light"] .input::placeholder,[data-theme="light"] textarea::placeholder{color:#666d83;opacity:1}
+[data-theme="light"] .button.outline{background:#f0eeff;border-color:#c5bef4;color:#4738a5}
+[data-theme="light"] .small-button{background:#f0eeff;border-color:#c5bef4;color:#4738a5}
+[data-theme="light"] .tag{color:#4c4595;background:#efedff}
+[data-theme="light"] .eyebrow{background:#efedff;color:#493aab;border-color:#d0c9ff}
+[data-theme="light"] .tab{background:#eeecf8;color:#515973}
+[data-theme="light"] .tab.active{background:#e9e6ff;border-color:#bcb3fa;color:#4738a5}
+[data-theme="light"] .summary{background:#f2f0ff;border-color:#d2cdf1;color:#3f4359}
+[data-theme="light"] .summary strong{color:#4438a0}
+[data-theme="light"] .hint{background:#fff5dc;border-color:#ebd18b;color:#735400}
+[data-theme="light"] .notification{background:#f2f0ff;border-color:#d8d2f4;color:#202237}
+[data-theme="light"] .notification.read{background:#fff}
+[data-theme="light"] .notice-icon{background:#e9e6ff;border-color:#d3cef5;color:#493aa8}
+[data-theme="light"] .match-card-top,[data-theme="light"] .match-score-panel>strong{color:#4b3da7}
+[data-theme="light"] .match-reasons span{background:#f0eeff;border-color:#d5cff6;color:#4c4595}
+[data-theme="light"] .match-status{color:#525a73}
+[data-theme="light"] .item-image .image-placeholder{color:#515973;background:#eeecf8}
+[data-theme="light"] .item-image.found .image-placeholder{background:#e8f4f1}
+[data-theme="light"] .page.my-claims-page .claim-status.approved,[data-theme="light"] .page.my-claims-page .claim-status.collected{color:#176a49;background:#e7f7ef;border-color:#9ad7b7}
+[data-theme="light"] .page.my-claims-page .claim-status.pending{color:#775500;background:#fff5d9;border-color:#edcf73}
+[data-theme="light"] .page.my-claims-page .claim-status.rejected{color:#9d2633;background:#feeaec;border-color:#efa6ad}
+body[data-theme="light"] #auth-root .auth-card{background:#fff;border-color:#d8d7e6;color:#202237}
+body[data-theme="light"] #auth-root .auth-card h2,body[data-theme="light"] #auth-root .auth-title{color:#202237}
+body[data-theme="light"] #auth-root .auth-tabs{background:#eeecf8}
+body[data-theme="light"] #auth-root .auth-tabs button{color:#555c73}
+body[data-theme="light"] #auth-root .auth-tabs button.active{background:#e8e5ff;color:#4638a5}
+body[data-theme="light"] #auth-root .auth-role{background:#fff;color:#555c73;border-color:#c8c8d8}
+body[data-theme="light"] #auth-root .auth-role.active{background:#ece9ff;color:#4738a5;border-color:#8c7de9}
+body[data-theme="light"] #auth-root .auth-error{color:#b42335}
+body[data-theme="light"] #auth-root .auth-success{color:#176a49}
+body[data-theme="light"] #auth-root .auth-switch{color:#493aa8}
+body[data-theme="light"] .page.my-claims-page .claim-decision-copy,body[data-theme="light"] .page.my-claims-page .item-found-location{color:#292744}
+body[data-theme="light"] .page.my-claims-page .item-found-location p{color:#24243b}
+body[data-theme="light"] .account-info{background:linear-gradient(135deg,#f4f1ff,#fff);border-color:#d7d1f4}
+body[data-theme="light"] .account-role{color:#4b3da5;background:#efedff;border-color:#c5bef4}
+body[data-theme="light"] .account-role[data-role=student]{color:#176a49;background:#e7f7ef}
+body[data-theme="light"] .account-role[data-role=unavailable]{color:#a72838;background:#feeaec}
+body[data-theme="light"] .submit-error,body[data-theme="light"] .image-preview-error,body[data-theme="light"] .auth-error{color:#b42335}
+.image-preview .image-placeholder{display:grid;place-items:center;min-height:80px;padding:14px;border:1px dashed var(--line);border-radius:12px;background:var(--surface-2);color:var(--muted);font-size:14px}
+.image-preview .default-image-label{flex:1 1 100%}
+button:hover:not(:disabled),.auth-role:hover:not(:disabled){filter:brightness(1.1)}
+button:disabled{cursor:not-allowed;opacity:.62}
+dialog,[role="dialog"]{background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:16px}
+[data-theme="light"] dialog,[data-theme="light"] [role="dialog"]{background:#fff;color:#202237}
+[data-theme="light"] .summary{color:#34384f}
+[data-theme="light"] .admin-message.error{color:#b42335}
