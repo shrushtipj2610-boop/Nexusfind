@@ -4,6 +4,7 @@ import { auth, db, isConfigured } from './firebase.js';
 import { getUserDetails } from './auth.js';
 import { uploadItemImage } from './storage.js';
 import { calculateMatchScore } from './matching.js';
+import { getReportImageUrl } from './item-images.js';
 
 function matchKey(lostId, foundId) { return `${lostId}_${foundId}`; }
 
@@ -62,12 +63,15 @@ export async function createItemReport(report = {}) {
     throw new Error('Please sign in before submitting a report.');
   }
 
-  let imageUrl = report.imageUrl || null;
+  // Keep valid saved user photos first; re-resolve old local defaults from the
+  // report fields so a stale bundled path cannot override a better exact match.
+  let imageUrl = getReportImageUrl(report) || '';
   if (report.imageFile) {
     try {
       console.info('[IMAGE] Upload started');
-      imageUrl = await uploadItemImage(report.imageFile);
-      if (!imageUrl) throw new Error('Firebase Storage returned no image URL.');
+      const uploadedImageUrl = await uploadItemImage(report.imageFile);
+      if (!uploadedImageUrl) throw new Error('Image processing returned no image data.');
+      imageUrl = uploadedImageUrl;
       console.info('[IMAGE] Upload completed');
     } catch (error) {
       console.error('[IMAGE] Upload failed; report was not saved:', error);
@@ -322,40 +326,9 @@ export async function decideOwnershipClaim(claimId, decision, rejectionReason = 
     else tx.delete(activeRef);
     if (decision === 'Approved') tx.update(itemRef, { status: 'reserved', reservedFor: claim.claimantId, reservedClaimId: claimId, updatedAt: serverTimestamp() });
     const reasonText = decision === 'Rejected' && rejectionReason.trim() ? ` Reason: ${rejectionReason.trim().slice(0, 1000)}` : '';
-    tx.set(decisionNotice, { type: 'claim_decision', title: `Claim ${decision.toLowerCase()}`, message: `Your claim for ${claim.itemName} was ${decision.toLowerCase()}.${reasonText}`, userId: claim.claimantId, claimId, itemId: claim.itemId, read: false, createdAt: serverTimestamp() });
+    const reportedLocation = typeof itemSnap.data().location === 'string' ? itemSnap.data().location : '';
+    const approvalMessage = `Your ownership claim has been approved! The found item was reported at: ${reportedLocation.trim() ? reportedLocation : 'No location was provided in the found-item report.'}`;
+    tx.set(decisionNotice, { type: 'claim_decision', title: `Claim ${decision.toLowerCase()}`, message: decision === 'Approved' ? approvalMessage : `Your claim for ${claim.itemName} was rejected.${reasonText}`, userId: claim.claimantId, claimId, itemId: claim.itemId, read: false, createdAt: serverTimestamp() });
     tx.set(doc(collection(db, 'adminAudit')), { actorUid: admin.uid, action: `claim_${decision.toLowerCase()}`, targetId: claimId, outcome: 'success', createdAt: serverTimestamp() });
-  });
-}
-
-export async function coordinateClaimPickup(claimId, pickupDetails) {
-  const admin = auth?.currentUser;
-  if (!admin || !pickupDetails.trim()) throw new Error('Add pickup location and timing details.');
-  const claimRef = doc(db, 'claims', claimId), noticeRef = doc(collection(db, 'notifications'));
-  await runTransaction(db, async (tx) => {
-    const snapshot = await tx.get(claimRef);
-    if (!snapshot.exists() || snapshot.data().status !== 'Approved') throw new Error('Only approved claims can be coordinated for pickup.');
-    const claim = snapshot.data();
-    if (claim.pickupStatus === 'Recovered') throw new Error('This item has already been marked recovered.');
-    tx.update(claimRef, { pickupStatus: 'Coordinated', pickupDetails: pickupDetails.trim().slice(0, 1000), pickupCoordinatedBy: admin.uid, pickupCoordinatedAt: serverTimestamp() });
-    tx.set(noticeRef, { type: 'pickup_update', title: 'Pickup coordinated', message: `Pickup details for ${claim.itemName}: ${pickupDetails.trim().slice(0, 1000)}`, userId: claim.claimantId, claimId, itemId: claim.itemId, read: false, createdAt: serverTimestamp() });
-    tx.set(doc(collection(db, 'adminAudit')), { actorUid: admin.uid, action: 'claim_pickup_coordinated', targetId: claimId, outcome: 'success', createdAt: serverTimestamp() });
-  });
-}
-
-export async function confirmClaimReceived(claimId) {
-  const claimant = auth?.currentUser;
-  if (!claimant) throw new Error('Sign in before confirming pickup.');
-  const claimRef = doc(db, 'claims', claimId), recoveredNotice = doc(db, 'notifications', `recovery_claimant_${claimId}`), adminNotice = doc(db, 'notifications', `recovery_admin_${claimId}`);
-  await runTransaction(db, async (tx) => {
-    const claimSnap = await tx.get(claimRef);
-    if (!claimSnap.exists()) throw new Error('This claim no longer exists.');
-    const claim = claimSnap.data();
-    if (claim.claimantId !== claimant.uid || claim.status !== 'Approved' || claim.pickupStatus !== 'Coordinated') throw new Error('Pickup must be coordinated before you can confirm receipt.');
-    const itemRef = doc(db, 'items', claim.itemId), itemSnap = await tx.get(itemRef);
-    if (!itemSnap.exists() || itemSnap.data().reservedClaimId !== claimRef.id || itemSnap.data().reservedFor !== claimant.uid) throw new Error('This item is no longer reserved for your claim.');
-    tx.update(claimRef, { pickupStatus: 'Recovered', receivedAt: serverTimestamp() });
-    tx.update(itemRef, { status: 'recovered', updatedAt: serverTimestamp() });
-    tx.set(recoveredNotice, { type: 'recovery_update', title: 'Item marked recovered', message: `${claim.itemName} was marked recovered after the claimant confirmed receipt.`, userId: itemSnap.data().userId, claimId: claimRef.id, itemId: claim.itemId, read: false, createdAt: serverTimestamp() });
-    tx.set(adminNotice, { type: 'recovery_update', audience: 'admins', title: 'Pickup confirmed', message: `${claim.itemName} was marked recovered by the claimant.`, claimId: claimRef.id, itemId: claim.itemId, read: false, createdAt: serverTimestamp() });
   });
 }

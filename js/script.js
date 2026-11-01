@@ -1,15 +1,6 @@
-import { getReportImageUrl } from './item-images.js';
+import { bindReportImageFallback, getReportImageCandidates, getReportImageUrl } from './item-images.js';
 const $ = (s, p = document) => p.querySelector(s);
 const root = $('#page-root');
-const reports = [
-  ['⚡','Apple AirPods Pro','White AirPods in a black case with a small sticker','Library','Electronics','Jul 24, 2026','lost'],
-  ['🪪','Student ID Card','Found near the billing counter, name visible on card','Canteen','ID Cards','Jul 23, 2026','found'],
-  ['🎒','Blue Backpack','Navy blue Nike backpack with laptop compartment','Classroom B-204','Bags & Backpacks','Jul 22, 2026','returned'],
-  ['🔑','Bunch of Keys','3 keys on a red keychain ring','Parking Area','Keys','Jul 22, 2026','found'],
-  ['💧','Steel Water Bottle','Silver reusable bottle with black cap','Gym','Personal Items','Jul 21, 2026','found'],
-  ['📱','Phone Charger','White Type-C charger and cable','Computer Lab','Electronics','Jul 20, 2026','lost']
-];
-const itemCard = (r) => `<article class="card item-card"><div class="item-image ${r[6]}"><span class="badge ${r[6]}">${r[6][0].toUpperCase()+r[6].slice(1)}</span>${r[0]}</div><div class="item-content"><h3>${r[1]}</h3><p>${r[2]}</p><div class="place">${r[3]}</div><div class="meta"><span class="tag">${r[4]}</span><span>${r[5]}</span></div></div></article>`;
 let persistedReports = [];
 let notificationsData = [];
 let matchesData = [];
@@ -21,23 +12,11 @@ let claimsLoadError = false;
 const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]);
 const reportDate = (report) => report.dateFound || report.dateLost || 'Date not provided';
 const getReportImage = (report = {}) => getReportImageUrl(report);
-const reportImageMarkup = (url, itemName, className = '') => url
-  ? `<img class="${className}" data-report-image src="${escapeHtml(url)}" alt="${escapeHtml(itemName || 'Reported item')}">`
-  : '<span class="image-placeholder" role="img" aria-label="No image available">No image available</span>';
 const reportImageFor = (report = {}, className = '') => {
-  const url = getReportImage(report);
-  if (!url) return reportImageMarkup(null, report.itemName, className);
-  return `<img class="${className}" data-report-image src="${escapeHtml(url)}" alt="${escapeHtml(report.itemName || 'Reported item')}">`;
+  const [url, ...fallbacks] = getReportImageCandidates(report);
+  if (!url) return '<span class="image-placeholder" role="img" aria-label="No image available">No image available</span>';
+  return `<img class="${className}" data-report-image data-report-id="${escapeHtml(report.id || report.reportId || '')}" data-image-fallbacks="${escapeHtml(JSON.stringify(fallbacks))}" src="${escapeHtml(url)}" alt="${escapeHtml(report.itemName || 'Reported item')}">`;
 };
-const bindReportImageFallback = (container = document) => container.querySelectorAll('img[data-report-image]').forEach((image) => image.addEventListener('error', () => {
-  let imageUrl = image.currentSrc || image.src;
-  try { const safeUrl = new URL(imageUrl); safeUrl.search = ''; imageUrl = safeUrl.href; } catch { /* Keep non-URL image paths readable in logs. */ }
-  console.warn('[REPORT IMAGE] Image URL failed to load:', { itemName: image.alt, imageUrl });
-  const placeholder = document.createElement('span');
-  placeholder.className = 'image-placeholder image-placeholder-error';
-  placeholder.textContent = 'Image unavailable';
-  image.replaceWith(placeholder);
-}));
 const imagePreviewUrls = new Map();
 function releaseImagePreview(file) {
   const url = imagePreviewUrls.get(file);
@@ -49,7 +28,7 @@ function bindImagePreview(input, preview, getFile, setFile, getDefaultReport = (
     const file = getFile();
     preview.replaceChildren();
     if (!file) {
-      const match = getReportImage(getDefaultReport());
+      const [match, ...fallbacks] = getReportImageCandidates(getDefaultReport());
       if (!match) {
         const empty = document.createElement('span');
         empty.className = 'image-placeholder';
@@ -60,11 +39,13 @@ function bindImagePreview(input, preview, getFile, setFile, getDefaultReport = (
       const image = document.createElement('img');
       image.src = match;
       image.alt = 'Suggested image for this report';
-      image.onerror = () => { preview.replaceChildren(); const unavailable = document.createElement('span'); unavailable.className = 'image-placeholder'; unavailable.textContent = 'Image unavailable'; preview.append(unavailable); };
+      image.dataset.reportImage = '';
+      image.dataset.imageFallbacks = JSON.stringify(fallbacks);
       const label = document.createElement('small');
       label.className = 'default-image-label';
       label.textContent = 'Suggested project image · upload a photo to replace it';
       preview.append(image, label);
+      bindReportImageFallback(preview);
       return render;
     }
     let url = imagePreviewUrls.get(file);
